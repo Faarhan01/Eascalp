@@ -1,0 +1,21 @@
+; AdvancedScalpingEA Preset — XAUUSD (Gold) M5 Research & Demo Testing
+InpOperatingMode=0
+InpAllowLiveTrading=false
+InpConfirmLiveRiskAcknowledgement=false
+InpMagicNumber=510301
+InpConfigLabel=XAUUSD_M5_Research
+InpPrimaryTimeframe=5
+InpIntermediateTimeframe=15
+InpHigherTimeframe=60
+InpMinSignalScore=66.0
+InpMaxSpreadPoints=45.0
+InpMaxSpreadRatio=1.80
+InpMaxVolatilityRatio=2.80
+InpDefaultSlAtrMult=1.7
+InpDefaultTpAtrMult=2.5
+InpRiskPerTradePct=0.35
+InpMaxRiskPerTradePct=0.75
+InpMaxDailyLossPct=2.00
+InpMaxAccountDrawdownPct=8.00
+InpMaxSlippagePoints=40
+InpShowDashboard=true

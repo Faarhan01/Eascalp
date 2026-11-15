@@ -1,0 +1,6 @@
+{
+  "name": "ApexQuant MT5 Scalping Suite",
+  "description": "Multi-market MetaTrader 5 scalping Expert Advisor source architecture, configuration studio, and read-only CSV performance analytics terminal.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -1,0 +1,20 @@
+; AdvancedScalpingEA Preset — US500 / Stock Index M5 Research & Demo Testing
+InpOperatingMode=0
+InpAllowLiveTrading=false
+InpConfirmLiveRiskAcknowledgement=false
+InpMagicNumber=510302
+InpConfigLabel=US500_M5_Research
+InpPrimaryTimeframe=5
+InpIntermediateTimeframe=15
+InpHigherTimeframe=60
+InpMinSignalScore=65.0
+InpMaxSpreadPoints=120.0
+InpMaxSpreadRatio=1.85
+InpRiskPerTradePct=0.40
+InpMaxRiskPerTradePct=0.80
+InpMaxDailyLossPct=2.00
+InpMaxAccountDrawdownPct=10.00
+InpEnableSessionFilter=true
+InpSessionStartHour=14
+InpSessionEndHour=21
+InpShowDashboard=true
