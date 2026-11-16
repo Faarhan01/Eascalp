@@ -1,7 +1,7 @@
 //+------------------------------------------------------------------+
 //|                                                MicroMomentum.mqh |
 //|                        Advanced Multi-Market MT5 Scalping EA     |
-//|                        Strategy 7: Tick Micro-Momentum Scalping  |
+//|                        v2.0.0 Strategy 7: Tick Micro-Momentum    |
 //+------------------------------------------------------------------+
 #ifndef __ASEA_STRATEGIES_MICROMOMENTUM_MQH__
 #define __ASEA_STRATEGIES_MICROMOMENTUM_MQH__
@@ -18,9 +18,9 @@ private:
 public:
    CStrategyMicroMomentum() : CStrategyBase(STRAT_MICRO_MOMENTUM, "Micro-Momentum")
    {
-      m_minConsecTicks = 4;
-      m_minVelocityPtsSec = 2.0;
-      m_maxSpreadToAtrPct = 18.0;
+      m_minConsecTicks = 3;
+      m_minVelocityPtsSec = 1.0;
+      m_maxSpreadToAtrPct = 22.0;
    }
 
    void Configure(const bool enabled, const double slMult, const double tpMult, const int minSample,
@@ -32,9 +32,16 @@ public:
       m_maxSpreadToAtrPct = MathMax(5.0, MathMin(40.0, maxSpreadAtrPct));
    }
 
-   virtual bool IsSuitableForRegime(const ENUM_MARKET_REGIME regime) const override
+   virtual ENUM_STRATEGY_SUITABILITY GetRegimeSuitability(const ENUM_MARKET_REGIME regime) const override
    {
-      return (regime != REGIME_UNSTABLE && regime != REGIME_LOW_VOLATILITY);
+      if(regime == REGIME_STRONG_BULL_TREND || regime == REGIME_STRONG_BEAR_TREND ||
+         regime == REGIME_EARLY_TREND_BULL || regime == REGIME_EARLY_TREND_BEAR ||
+         regime == REGIME_VOL_EXPANSION)
+         return SUIT_SUITABLE;
+      if(regime == REGIME_ESTABLISHED_BULL || regime == REGIME_ESTABLISHED_BEAR ||
+         regime == REGIME_WEAK_BULL_TREND || regime == REGIME_WEAK_BEAR_TREND)
+         return SUIT_CONDITIONAL;
+      return SUIT_UNSUITABLE;
    }
 
    virtual bool Evaluate(const SAnalysisContext &ctx, STradeSignal &outSignal, string &outRejectReason) override
@@ -45,7 +52,7 @@ public:
       if(!m_enabled) { outRejectReason = "Strategy disabled by input"; return false; }
       if(!IsSuitableForRegime(ctx.regime.regime))
       {
-         outRejectReason = "Regime unsuitable for micro-momentum: " + ctx.regime.label;
+         outRejectReason = "Regime unsuitable for tick micro-momentum: " + ctx.regime.label;
          return false;
       }
       if(!ctx.ticks.isReady || !ctx.ind.isReady || ctx.ind.atr <= 0.0 || ctx.symbolProfile.point <= 0.0)
@@ -54,8 +61,16 @@ public:
          return false;
       }
 
-      // Mandatory spread & execution-cost filter
-      if(ctx.ticks.spreadSpikeDetected || ctx.market.spreadRatio > 1.45)
+      // Cost-validated tick edge + strict spread ceiling
+      bool strongTickRun = ((ctx.ticks.consecutiveUpTicks >= 4 || ctx.ticks.consecutiveDownTicks >= 4) &&
+                            ctx.ticks.directionalPersistence >= 0.60 &&
+                            MathAbs(ctx.ticks.shortTermDisplacement) > ctx.market.spreadPoints);
+      if(!ctx.ticks.tickProvidesNetEdge && !strongTickRun)
+      {
+         outRejectReason = "Tick displacement does not clear spread/execution cost safety factor";
+         return false;
+      }
+      if(ctx.ticks.spreadSpikeDetected || ctx.market.spreadRatio > 1.75)
       {
          outRejectReason = StringFormat("Spread expansion blocked micro-momentum (ratio=%.2f)", ctx.market.spreadRatio);
          return false;
@@ -67,46 +82,74 @@ public:
          outRejectReason = StringFormat("Execution cost too high: spread %.1f%% of ATR (limit %.1f%%)", spreadToAtrPct, m_maxSpreadToAtrPct);
          return false;
       }
+      if(ctx.ticks.momentumDeteriorating || ctx.ticks.directionalPersistence < 0.54)
+      {
+         outRejectReason = StringFormat("Tick persistence %.2f too low or velocity decelerating", ctx.ticks.directionalPersistence);
+         return false;
+      }
+
+      double pipPts = (ctx.symbolProfile.pipSize > 0.0 && ctx.symbolProfile.point > 0.0)
+                      ? MathMax(1.0, ctx.symbolProfile.pipSize / ctx.symbolProfile.point)
+                      : 1.0;
+      double effMinVel = MathMax(0.25, m_minVelocityPtsSec * MathMax(0.25, pipPts * 0.1));
 
       bool bullBurst = (ctx.ticks.consecutiveUpTicks >= m_minConsecTicks &&
-                        ctx.ticks.priceVelocity >= m_minVelocityPtsSec &&
-                        ctx.ticks.priceAcceleration > 0.0 &&
-                        ctx.ticks.microTrendBias >= 0.45 &&
+                        ctx.ticks.priceVelocity >= effMinVel &&
+                        ctx.ticks.priceAcceleration >= -0.5 &&
+                        ctx.ticks.microTrendBias >= 0.28 &&
                         ctx.ind.emaFast >= ctx.ind.emaMedium &&
                         ctx.mtf.higherBias != SIGNAL_SELL);
 
       if(bullBurst)
       {
-         double slDist = ctx.ind.atr * m_slAtrMult;
-         double tpDist = ctx.ind.atr * m_tpAtrMult;
-         PopulateCommonSignal(outSignal, ctx, SIGNAL_BUY, slDist, tpDist, 0.70,
-                              "Bullish tick velocity & acceleration burst passing spread-cost filter",
-                              StringFormat("UpTicks=%d, Vel=%.2f pts/s, SpreadCost=%.1f%% ATR", ctx.ticks.consecutiveUpTicks, ctx.ticks.priceVelocity, spreadToAtrPct),
+         double slDist = ComputeStructuralSLDist(ctx, SIGNAL_BUY, m_slAtrMult, m_slAtrMult * 1.30);
+         double tpDist = MathMax(slDist * 1.25, ctx.ind.atr * m_tpAtrMult);
+         PopulateCommonSignal(outSignal, ctx, SIGNAL_BUY, slDist, tpDist, 0.72,
+                              "Bullish cost-validated tick velocity, persistence & acceleration burst",
+                              StringFormat("UpTicks=%d, Vel=%.2f pts/s, Persist=%.2f, Spread=%.1f%% ATR",
+                                           ctx.ticks.consecutiveUpTicks, ctx.ticks.priceVelocity, ctx.ticks.directionalPersistence, spreadToAtrPct),
                               ctx.structure.summary, ctx.candle.name,
                               ctx.mtf.hasStrongConflict ? ctx.mtf.conflictReason : "None");
          return true;
       }
 
       bool bearBurst = (ctx.ticks.consecutiveDownTicks >= m_minConsecTicks &&
-                        ctx.ticks.priceVelocity <= -m_minVelocityPtsSec &&
-                        ctx.ticks.priceAcceleration < 0.0 &&
-                        ctx.ticks.microTrendBias <= -0.45 &&
+                        ctx.ticks.priceVelocity <= -effMinVel &&
+                        ctx.ticks.priceAcceleration <= 0.5 &&
+                        ctx.ticks.microTrendBias <= -0.28 &&
                         ctx.ind.emaFast <= ctx.ind.emaMedium &&
                         ctx.mtf.higherBias != SIGNAL_BUY);
 
       if(bearBurst)
       {
-         double slDist = ctx.ind.atr * m_slAtrMult;
-         double tpDist = ctx.ind.atr * m_tpAtrMult;
-         PopulateCommonSignal(outSignal, ctx, SIGNAL_SELL, slDist, tpDist, 0.70,
-                              "Bearish tick velocity & acceleration burst passing spread-cost filter",
-                              StringFormat("DownTicks=%d, Vel=%.2f pts/s, SpreadCost=%.1f%% ATR", ctx.ticks.consecutiveDownTicks, ctx.ticks.priceVelocity, spreadToAtrPct),
+         double slDist = ComputeStructuralSLDist(ctx, SIGNAL_SELL, m_slAtrMult, m_slAtrMult * 1.30);
+         double tpDist = MathMax(slDist * 1.25, ctx.ind.atr * m_tpAtrMult);
+         PopulateCommonSignal(outSignal, ctx, SIGNAL_SELL, slDist, tpDist, 0.72,
+                              "Bearish cost-validated tick velocity, persistence & acceleration burst",
+                              StringFormat("DownTicks=%d, Vel=%.2f pts/s, Persist=%.2f, Spread=%.1f%% ATR",
+                                           ctx.ticks.consecutiveDownTicks, ctx.ticks.priceVelocity, ctx.ticks.directionalPersistence, spreadToAtrPct),
                               ctx.structure.summary, ctx.candle.name,
                               ctx.mtf.hasStrongConflict ? ctx.mtf.conflictReason : "None");
          return true;
       }
 
-      outRejectReason = "Tick velocity/consecutive-run/HTF alignment criteria not met";
+      outRejectReason = "Tick velocity/persistence/HTF alignment criteria not met";
+      return false;
+   }
+
+   virtual bool ShouldExitPosition(const SManagedPosition &pos, const SAnalysisContext &ctx, string &outExitReason) const override
+   {
+      if(pos.holdingSeconds < 30 || !ctx.ticks.isReady) return false;
+      if(pos.direction == SIGNAL_BUY && ctx.ticks.momentumDeteriorating && ctx.ticks.microTrendBias < -0.35)
+      {
+         outExitReason = "MicroMomentum exit: tick burst reversed downward";
+         return true;
+      }
+      if(pos.direction == SIGNAL_SELL && ctx.ticks.momentumDeteriorating && ctx.ticks.microTrendBias > 0.35)
+      {
+         outExitReason = "MicroMomentum exit: tick burst reversed upward";
+         return true;
+      }
       return false;
    }
 };

@@ -41,6 +41,20 @@ public:
       if(StringLen(s) <= maxLen) return s;
       return StringSubstr(s, 0, MathMax(1, maxLen - 3)) + "...";
    }
+
+   static string AbbreviateStrategy(const string name, const int maxLen)
+   {
+      if(maxLen <= 0 || StringLen(name) <= maxLen) return name;
+      string clean = name;
+      StringReplace(clean, " Scalping", "");
+      StringReplace(clean, "Scalping", "");
+      StringReplace(clean, "Volatility ", "Vol ");
+      StringReplace(clean, "Micro-", "u");
+      StringTrimLeft(clean);
+      StringTrimRight(clean);
+      if(StringLen(clean) <= maxLen) return clean;
+      return StringSubstr(clean, 0, maxLen);
+   }
 };
 
 #endif // __ASEA_DASHBOARD_STATISTICS_MQH__

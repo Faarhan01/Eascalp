@@ -1,7 +1,7 @@
 //+------------------------------------------------------------------+
 //|                                              TradeValidation.mqh |
 //|                        Advanced Multi-Market MT5 Scalping EA     |
-//|                        Pre-Execution Trade Validation Gate       |
+//|                        v2.0.0 Pre-Execution Validation & Stats   |
 //+------------------------------------------------------------------+
 #ifndef __ASEA_TRADING_TRADEVALIDATION_MQH__
 #define __ASEA_TRADING_TRADEVALIDATION_MQH__
@@ -19,6 +19,7 @@ struct SValidationConfig
    double minVolatilityRatio;
    int    minRequiredBars;
    bool   requireMtfNoStrongConflict;
+   bool   requireEconomicallyViableExp;
    bool   enableSessionFilter;
    int    sessionStartHour;
    int    sessionEndHour;
@@ -27,19 +28,43 @@ struct SValidationConfig
 
    void ResetDefaults()
    {
-      minSignalScore = 62.0;
-      maxSpreadPoints = 60.0;
-      maxSpreadRatio = 1.85;
-      maxSpreadAtrPct = 25.0;
-      maxVolatilityRatio = 2.6;
-      minVolatilityRatio = 0.45;
-      minRequiredBars = 100;
-      requireMtfNoStrongConflict = true;
+      minSignalScore = 48.0;
+      maxSpreadPoints = 0.0;
+      maxSpreadRatio = 2.50;
+      maxSpreadAtrPct = 32.0;
+      maxVolatilityRatio = 3.20;
+      minVolatilityRatio = 0.30;
+      minRequiredBars = 50;
+      requireMtfNoStrongConflict = false;
+      requireEconomicallyViableExp = true;
       enableSessionFilter = false;
       sessionStartHour = 7;
       sessionEndHour = 21;
-      avoidFridayLateHours = true;
-      fridayCutoffHour = 20;
+      avoidFridayLateHours = false;
+      fridayCutoffHour = 21;
+   }
+};
+
+struct SFilterStats
+{
+   long totalEvaluated;
+   long totalPassed;
+   long rejLowScore;
+   long rejMtfConflict;
+   long rejSpread;
+   long rejVolatility;
+   long rejSession;
+   long rejRisk;
+   long rejExpectancy;
+   long rejStopsVolumeMargin;
+   long rejOther;
+
+   void Reset()
+   {
+      totalEvaluated = 0; totalPassed = 0;
+      rejLowScore = 0; rejMtfConflict = 0; rejSpread = 0;
+      rejVolatility = 0; rejSession = 0; rejRisk = 0;
+      rejExpectancy = 0; rejStopsVolumeMargin = 0; rejOther = 0;
    }
 };
 
@@ -47,6 +72,7 @@ class CTradeValidation
 {
 private:
    SValidationConfig m_cfg;
+   SFilterStats      m_stats;
 
    bool IsWithinConfiguredHours(const datetime now, const bool is24x7) const
    {
@@ -62,7 +88,6 @@ private:
       if(m_cfg.sessionStartHour <= m_cfg.sessionEndHour)
          return (dt.hour >= m_cfg.sessionStartHour && dt.hour < m_cfg.sessionEndHour);
 
-      // Overnight wrap
       return (dt.hour >= m_cfg.sessionStartHour || dt.hour < m_cfg.sessionEndHour);
    }
 
@@ -70,6 +95,7 @@ public:
    CTradeValidation()
    {
       m_cfg.ResetDefaults();
+      m_stats.Reset();
    }
 
    void Configure(const SValidationConfig &cfg)
@@ -77,17 +103,21 @@ public:
       m_cfg = cfg;
    }
 
+   SFilterStats GetFilterStats() const { return m_stats; }
+
    SValidationResult Validate(const STradeSignal &sig, const SSymbolProfile &prof, const SMarketSnapshot &market,
-                              const SRegimeState &regime, const SMTFAnalysis &mtf, const SRiskStatus &risk,
-                              const CSymbolIntelligence &symIntel, const double proposedLots,
-                              const bool allowExecMode) const
+                              const SIndicatorValues &ind, const SRegimeState &regime, const SMTFAnalysis &mtf,
+                              const SRiskStatus &risk, const CSymbolIntelligence &symIntel,
+                              const double proposedLots, const bool allowExecMode)
    {
       SValidationResult res;
       res.Reset();
+      m_stats.totalEvaluated++;
 
       // 1. Signal direction and validity
       if(!sig.isValid || sig.direction == SIGNAL_NONE)
       {
+         m_stats.rejOther++;
          res.rejectionCode = "INVALID_SIGNAL";
          res.rejectionReason = "Signal direction is NONE or signal struct invalid.";
          return res;
@@ -96,6 +126,7 @@ public:
       // 2. Signal quality score threshold
       if(sig.compositeScore < m_cfg.minSignalScore)
       {
+         m_stats.rejLowScore++;
          res.rejectionCode = "LOW_SIGNAL_SCORE";
          res.rejectionReason = StringFormat("Composite score %.1f below threshold %.1f.", sig.compositeScore, m_cfg.minSignalScore);
          return res;
@@ -104,6 +135,7 @@ public:
       // 3. MTF strong conflict guard
       if(m_cfg.requireMtfNoStrongConflict && mtf.hasStrongConflict)
       {
+         m_stats.rejMtfConflict++;
          res.rejectionCode = "MTF_CONFLICT";
          res.rejectionReason = "Multi-timeframe conflict: " + mtf.conflictReason;
          return res;
@@ -112,34 +144,52 @@ public:
       // 4. Historical data & market data readiness
       if(!market.dataReady || prof.availableBarsPrimary < m_cfg.minRequiredBars)
       {
+         m_stats.rejOther++;
          res.rejectionCode = "DATA_INSUFFICIENT";
          res.rejectionReason = StringFormat("Insufficient historical bars (%d < %d) or market snapshot stale.", prof.availableBarsPrimary, m_cfg.minRequiredBars);
          return res;
       }
 
-      // 5. Spread checks (absolute, relative spike, and spread-to-ATR cost)
-      if(market.spreadPoints > m_cfg.maxSpreadPoints)
+      // 5. Spread checks (auto-adaptive or manual point cap, relative spike, and spread-to-ATR cost)
+      double spreadCap = (m_cfg.maxSpreadPoints > 0.0) ? m_cfg.maxSpreadPoints
+                         : symIntel.GetAutoMaxSpreadPoints(ind.isReady ? ind.atr : 0.0);
+      if(spreadCap > 0.0 && market.spreadPoints > spreadCap)
       {
+         m_stats.rejSpread++;
          res.rejectionCode = "SPREAD_TOO_WIDE";
-         res.rejectionReason = StringFormat("Spread %.1f pts exceeds max %.1f pts.", market.spreadPoints, m_cfg.maxSpreadPoints);
+         res.rejectionReason = StringFormat("Spread %.1f pts exceeds cap %.1f pts.", market.spreadPoints, spreadCap);
          return res;
       }
       if(market.spreadRatio > m_cfg.maxSpreadRatio)
       {
+         m_stats.rejSpread++;
          res.rejectionCode = "SPREAD_SPIKE";
          res.rejectionReason = StringFormat("Spread ratio %.2fx exceeds limit %.2fx.", market.spreadRatio, m_cfg.maxSpreadRatio);
          return res;
+      }
+      if(ind.isReady && ind.atr > 0.0 && prof.point > 0.0)
+      {
+         double spreadAtrPct = ((market.spreadPoints * prof.point) / ind.atr) * 100.0;
+         if(spreadAtrPct > m_cfg.maxSpreadAtrPct)
+         {
+            m_stats.rejSpread++;
+            res.rejectionCode = "SPREAD_TO_ATR_HIGH";
+            res.rejectionReason = StringFormat("Spread consumes %.1f%% of ATR (limit %.1f%%).", spreadAtrPct, m_cfg.maxSpreadAtrPct);
+            return res;
+         }
       }
 
       // 6. Volatility bounds & unstable market guard
       if(regime.isUnstable)
       {
+         m_stats.rejVolatility++;
          res.rejectionCode = "UNSTABLE_MARKET";
          res.rejectionReason = "Market regime classified as Unstable / Abnormal.";
          return res;
       }
       if(regime.volatilityRatio > m_cfg.maxVolatilityRatio || regime.volatilityRatio < m_cfg.minVolatilityRatio)
       {
+         m_stats.rejVolatility++;
          res.rejectionCode = "VOLATILITY_OUT_OF_BOUNDS";
          res.rejectionReason = StringFormat("Volatility ratio %.2f outside [%.2f, %.2f].", regime.volatilityRatio, m_cfg.minVolatilityRatio, m_cfg.maxVolatilityRatio);
          return res;
@@ -148,12 +198,14 @@ public:
       // 7. Market session & trading hours
       if(!symIntel.IsTradingPermittedBySymbol())
       {
+         m_stats.rejSession++;
          res.rejectionCode = "SYMBOL_SESSION_CLOSED";
          res.rejectionReason = "Symbol trade mode disabled or market session closed.";
          return res;
       }
       if(!IsWithinConfiguredHours(market.tickTime, prof.isSynthetic24x7))
       {
+         m_stats.rejSession++;
          res.rejectionCode = "SESSION_FILTER_BLOCKED";
          res.rejectionReason = "Outside configured active trading hours or Friday cutoff.";
          return res;
@@ -162,25 +214,37 @@ public:
       // 8. Risk & exposure permissions
       if(risk.lockoutActive || !risk.tradingAllowed)
       {
+         m_stats.rejRisk++;
          res.rejectionCode = "RISK_LOCKOUT";
          res.rejectionReason = "Risk engine blocked entry: " + risk.lockoutReason;
          return res;
       }
 
-      // 9. Stop-loss validity vs broker minimum stop distance
+      // 9. Cost-aware Expectancy & R:R viability
+      if(m_cfg.requireEconomicallyViableExp && !sig.expectancy.economicallyViable)
+      {
+         m_stats.rejExpectancy++;
+         res.rejectionCode = "EXPECTANCY_UNVIABLE";
+         res.rejectionReason = "Expectancy/cost viability failed: " + sig.expectancy.summary;
+         return res;
+      }
+
+      // 10. Stop-loss validity vs broker minimum stop distance
       double minStopDist = symIntel.GetMinStopDistancePrice();
       double slDist = MathAbs(sig.entryPrice - sig.stopLoss);
       double tpDist = MathAbs(sig.takeProfit - sig.entryPrice);
       if(slDist < minStopDist || tpDist < minStopDist)
       {
+         m_stats.rejStopsVolumeMargin++;
          res.rejectionCode = "STOP_DISTANCE_INVALID";
          res.rejectionReason = StringFormat("SL/TP distance below broker minimum stop level (%.5f).", minStopDist);
          return res;
       }
 
-      // 10. Lot size & Margin availability
+      // 11. Lot size & Margin availability
       if(proposedLots < prof.volumeMin)
       {
+         m_stats.rejStopsVolumeMargin++;
          res.rejectionCode = "VOLUME_BELOW_MIN";
          res.rejectionReason = StringFormat("Calculated volume %.4f below broker min %.4f.", proposedLots, prof.volumeMin);
          return res;
@@ -192,23 +256,28 @@ public:
       {
          if(reqMargin > risk.freeMargin * 0.85)
          {
+            m_stats.rejStopsVolumeMargin++;
             res.rejectionCode = "INSUFFICIENT_MARGIN";
             res.rejectionReason = StringFormat("Required margin %.2f exceeds safe free margin allocation (%.2f).", reqMargin, risk.freeMargin);
             return res;
          }
       }
 
-      // 11. Terminal permission check if live/demo order execution is enabled
+      // 12. Terminal permission check if live/demo order execution is enabled
+      // Note: TERMINAL_TRADE_ALLOWED reflects the live terminal Algo Trading button and may be false during Strategy Tester runs.
       if(allowExecMode)
       {
-         if(!TerminalInfoInteger(TERMINAL_TRADE_ALLOWED) || !MQLInfoInteger(MQL_TRADE_ALLOWED))
+         bool isTester = (MQLInfoInteger(MQL_TESTER) != 0);
+         if((!isTester && !TerminalInfoInteger(TERMINAL_TRADE_ALLOWED)) || !MQLInfoInteger(MQL_TRADE_ALLOWED))
          {
+            m_stats.rejOther++;
             res.rejectionCode = "TERMINAL_AUTO_DISABLED";
             res.rejectionReason = "Algo trading is disabled in MT5 terminal or EA properties.";
             return res;
          }
       }
 
+      m_stats.totalPassed++;
       res.passed = true;
       res.rejectionCode = "PASSED";
       res.rejectionReason = "All validation checks passed.";

@@ -1,7 +1,7 @@
 //+------------------------------------------------------------------+
 //|                                                 StrategyBase.mqh |
 //|                        Advanced Multi-Market MT5 Scalping EA     |
-//|                        Independent Strategy Interface & Context  |
+//|                        v2.0.0 Independent Strategy Interface     |
 //+------------------------------------------------------------------+
 #ifndef __ASEA_STRATEGIES_STRATEGYBASE_MQH__
 #define __ASEA_STRATEGIES_STRATEGYBASE_MQH__
@@ -22,15 +22,9 @@ struct SAnalysisContext
 
    void Reset()
    {
-      symbolProfile.Reset();
-      market.Reset();
-      ticks.Reset();
-      ind.Reset();
-      structure.Reset();
-      candle.Reset();
-      chartPattern.Reset();
-      regime.Reset();
-      mtf.Reset();
+      symbolProfile.Reset(); market.Reset(); ticks.Reset(); ind.Reset();
+      structure.Reset(); candle.Reset(); chartPattern.Reset();
+      regime.Reset(); mtf.Reset();
    }
 };
 
@@ -57,15 +51,57 @@ protected:
       double minStop = MathMax((double)(prof.stopsLevelPoints + 4) * prof.point, prof.tickSize * 5.0);
       if(dir == SIGNAL_BUY)
       {
-         double dist = entry - sl;
-         if(dist < minStop) return entry - minStop;
+         if((entry - sl) < minStop) return entry - minStop;
       }
       else if(dir == SIGNAL_SELL)
       {
-         double dist = sl - entry;
-         if(dist < minStop) return entry + minStop;
+         if((sl - entry) < minStop) return entry + minStop;
       }
       return sl;
+   }
+
+   double ComputeStructuralSLDist(const SAnalysisContext &ctx, const ENUM_SIGNAL_DIRECTION dir,
+                                  const double baseAtrMult, const double maxAtrMult) const
+   {
+      double atr = ctx.ind.atr;
+      if(atr <= 0.0) return 0.0;
+
+      double baseDist = atr * baseAtrMult;
+      double maxDist  = atr * MathMax(baseAtrMult, maxAtrMult);
+      double spreadPad = (ctx.symbolProfile.point > 0.0) ? (ctx.market.spreadPoints * ctx.symbolProfile.point * 1.1) : 0.0;
+      double structDist = baseDist;
+
+      if(ctx.structure.isReady)
+      {
+         if(dir == SIGNAL_BUY)
+         {
+            double anchor = (ctx.structure.nearestSupport > 0.0 && ctx.structure.nearestSupport < ctx.market.ask)
+                            ? ctx.structure.nearestSupport
+                            : ctx.structure.lastSwingLow;
+            if(anchor > 0.0 && anchor < ctx.market.ask)
+            {
+               double cand = (ctx.market.ask - anchor) + atr * 0.22 + spreadPad;
+               if(cand >= baseDist * 0.85 && cand <= maxDist)
+                  structDist = MathMax(baseDist, cand);
+            }
+         }
+         else if(dir == SIGNAL_SELL)
+         {
+            double anchor = (ctx.structure.nearestResistance > 0.0 && ctx.structure.nearestResistance > ctx.market.bid)
+                            ? ctx.structure.nearestResistance
+                            : ctx.structure.lastSwingHigh;
+            if(anchor > 0.0 && anchor > ctx.market.bid)
+            {
+               double cand = (anchor - ctx.market.bid) + atr * 0.22 + spreadPad;
+               if(cand >= baseDist * 0.85 && cand <= maxDist)
+                  structDist = MathMax(baseDist, cand);
+            }
+         }
+      }
+
+      double minStop = MathMax((double)(ctx.symbolProfile.stopsLevelPoints + 4) * ctx.symbolProfile.point,
+                               ctx.symbolProfile.tickSize * 5.0);
+      return MathMax(minStop, MathMin(maxDist, structDist));
    }
 
    void PopulateCommonSignal(STradeSignal &sig, const SAnalysisContext &ctx, const ENUM_SIGNAL_DIRECTION dir,
@@ -74,9 +110,9 @@ protected:
                              const string patConf, const string conflicts)
    {
       sig.Reset();
-      sig.timestamp = ctx.market.tickTime;
-      sig.symbol    = ctx.market.symbol;
-      sig.timeframe = ctx.market.timeframe;
+      sig.timestamp    = ctx.market.tickTime;
+      sig.symbol       = ctx.market.symbol;
+      sig.timeframe    = ctx.market.timeframe;
       sig.strategyId   = m_id;
       sig.strategyName = m_name;
       sig.direction    = dir;
@@ -84,18 +120,22 @@ protected:
 
       double sl = (dir == SIGNAL_BUY) ? (sig.entryPrice - slDist) : (sig.entryPrice + slDist);
       sl = EnsureMinStop(ctx.symbolProfile, sig.entryPrice, sl, dir);
-      double tp = (dir == SIGNAL_BUY) ? (sig.entryPrice + tpDist) : (sig.entryPrice - tpDist);
+      double minStop = MathMax((double)(MathMax(ctx.symbolProfile.stopsLevelPoints, ctx.symbolProfile.freezeLevelPoints) + 4) * ctx.symbolProfile.point,
+                               ctx.symbolProfile.tickSize * 5.0);
+      double effTpDist = MathMax(tpDist, minStop);
+      double tp = (dir == SIGNAL_BUY) ? (sig.entryPrice + effTpDist) : (sig.entryPrice - effTpDist);
 
       sig.stopLoss      = sl;
       sig.takeProfit    = tp;
       sig.confidenceRaw = MathMax(0.0, MathMin(1.0, rawConf));
       sig.regime        = ctx.regime.regime;
-      sig.rationale            = rationale;
-      sig.supportingIndicators = supInd;
-      sig.supportingStructure  = supStruct;
-      sig.patternConfirmations = patConf;
+      sig.suitability   = GetRegimeSuitability(ctx.regime.regime);
+      sig.rationale             = rationale;
+      sig.supportingIndicators  = supInd;
+      sig.supportingStructure   = supStruct;
+      sig.patternConfirmations  = patConf;
       sig.conflictingConditions = conflicts;
-      sig.signalId = StringFormat("S%d_%I64d_%d", (int)m_id, (long)sig.timestamp, (int)dir);
+      sig.signalId = StringFormat("%s_S%d_%I64d_%d", ctx.market.symbol, (int)m_id, (long)sig.timestamp, (int)dir);
       sig.isValid  = true;
    }
 
@@ -127,18 +167,35 @@ public:
       m_slAtrMult     = MathMax(0.5, MathMin(6.0, slAtrMult));
       m_tpAtrMult     = MathMax(0.5, MathMin(10.0, tpAtrMult));
       m_minSampleSize = MathMax(10, minSampleSize);
-      m_stats.enabledByInput = enabled;
+      m_stats.enabledByInput  = enabled;
+      m_stats.minSampleTarget = m_minSampleSize;
    }
 
-   virtual bool IsSuitableForRegime(const ENUM_MARKET_REGIME regime) const = 0;
+   virtual ENUM_STRATEGY_SUITABILITY GetRegimeSuitability(const ENUM_MARKET_REGIME regime) const = 0;
+
+   virtual bool IsSuitableForRegime(const ENUM_MARKET_REGIME regime) const
+   {
+      ENUM_STRATEGY_SUITABILITY s = GetRegimeSuitability(regime);
+      return (s == SUIT_SUITABLE || s == SUIT_CONDITIONAL);
+   }
+
    virtual bool Evaluate(const SAnalysisContext &ctx, STradeSignal &outSignal, string &outRejectReason) = 0;
+
+   // Independent strategy-specific exit rule hook
+   virtual bool ShouldExitPosition(const SManagedPosition &pos, const SAnalysisContext &ctx, string &outExitReason) const
+   {
+      outExitReason = "";
+      return false;
+   }
 
    void RecordSignalGenerated() { m_stats.signalsGenerated++; }
    void RecordSignalAccepted()  { m_stats.signalsAccepted++; }
    void RecordSignalRejected()  { m_stats.signalsRejected++; }
 
-   void SetSelectorRecommendation(const bool rec, const bool detWarn)
+   void SetSelectorStatus(const ENUM_STRATEGY_SUITABILITY suit, const double suitScore, const bool rec, const bool detWarn)
    {
+      m_stats.suitability           = suit;
+      m_stats.suitabilityScore      = suitScore;
       m_stats.recommendedBySelector = rec;
       m_stats.deteriorationWarning  = detWarn;
    }
@@ -150,11 +207,15 @@ public:
       {
          m_stats.winningTrades++;
          m_stats.grossProfit += netProfit;
+         m_stats.currentConsecutiveLosses = 0;
       }
       else
       {
          m_stats.losingTrades++;
          m_stats.grossLoss += MathAbs(netProfit);
+         m_stats.currentConsecutiveLosses++;
+         if(m_stats.currentConsecutiveLosses > m_stats.maxConsecutiveLosses)
+            m_stats.maxConsecutiveLosses = m_stats.currentConsecutiveLosses;
       }
 
       m_stats.netProfit += netProfit;
@@ -164,13 +225,14 @@ public:
       if(dd > m_stats.maxDrawdownMoney) m_stats.maxDrawdownMoney = dd;
 
       m_totalHoldSec += (double)MathMax(0L, holdSeconds);
-      m_stats.avgHoldingSeconds = m_totalHoldSec / (double)m_stats.totalTrades;
-      m_stats.winRatePct = ((double)m_stats.winningTrades / (double)m_stats.totalTrades) * 100.0;
-      m_stats.profitFactor = (m_stats.grossLoss > 0.0) ? (m_stats.grossProfit / m_stats.grossLoss) : ((m_stats.grossProfit > 0.0) ? 9.99 : 0.0);
-      m_stats.expectedValue = m_stats.netProfit / (double)m_stats.totalTrades;
+      m_stats.avgHoldingSeconds   = m_totalHoldSec / (double)m_stats.totalTrades;
+      m_stats.avgWin              = (m_stats.winningTrades > 0) ? (m_stats.grossProfit / (double)m_stats.winningTrades) : 0.0;
+      m_stats.avgLoss             = (m_stats.losingTrades  > 0) ? (m_stats.grossLoss   / (double)m_stats.losingTrades)  : 0.0;
+      m_stats.winRatePct          = ((double)m_stats.winningTrades / (double)m_stats.totalTrades) * 100.0;
+      m_stats.profitFactor        = (m_stats.grossLoss > 0.0) ? (m_stats.grossProfit / m_stats.grossLoss) : ((m_stats.grossProfit > 0.0) ? 9.99 : 0.0);
+      m_stats.expectedValue       = m_stats.netProfit / (double)m_stats.totalTrades;
       m_stats.hasSufficientSample = (m_stats.totalTrades >= m_minSampleSize);
 
-      // Recent rolling window (up to 20 trades)
       m_recentPnLs[m_recentHead] = netProfit;
       m_recentHead = (m_recentHead + 1) % 20;
       if(m_recentCount < 20) m_recentCount++;
@@ -186,7 +248,7 @@ public:
       m_stats.recentWinRatePct = (m_recentCount > 0) ? ((double)rWins / (double)m_recentCount) * 100.0 : 0.0;
 
       int rIdx = (int)entryRegime;
-      if(rIdx >= 0 && rIdx < 12)
+      if(rIdx >= 0 && rIdx <= EA_MAX_REGIMES)
       {
          m_stats.regimeTrades[rIdx]++;
          m_stats.regimeNetProfit[rIdx] += netProfit;

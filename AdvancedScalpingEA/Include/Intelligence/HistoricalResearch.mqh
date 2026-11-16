@@ -1,7 +1,7 @@
 //+------------------------------------------------------------------+
 //|                                           HistoricalResearch.mqh |
 //|                        Advanced Multi-Market MT5 Scalping EA     |
-//|                        OOS Tagging, Walk-Forward & Monte Carlo   |
+//|                        v2.0.0 OOS, Walk-Forward, MC & ScoreBands |
 //+------------------------------------------------------------------+
 #ifndef __ASEA_INTELLIGENCE_HISTORICALRESEARCH_MQH__
 #define __ASEA_INTELLIGENCE_HISTORICALRESEARCH_MQH__
@@ -24,6 +24,11 @@ private:
    double   m_tradePnLs[];
    int      m_tradeCount;
 
+   // Score-band historical validation (<60, 60-74, 75+)
+   int      m_bandTrades[3];
+   int      m_bandWins[3];
+   double   m_bandNetPnL[3];
+
 public:
    CHistoricalResearch()
    {
@@ -32,6 +37,9 @@ public:
       m_oosSplitRatio = 0.30;
       m_tradeCount = 0;
       ArrayResize(m_tradePnLs, 0);
+      ArrayInitialize(m_bandTrades, 0);
+      ArrayInitialize(m_bandWins, 0);
+      ArrayInitialize(m_bandNetPnL, 0.0);
    }
 
    void Initialize(const int walkForwardDays, const double oosRatio)
@@ -41,15 +49,34 @@ public:
       m_oosSplitRatio = MathMax(0.10, MathMin(0.50, oosRatio));
       m_tradeCount = 0;
       ArrayResize(m_tradePnLs, 0);
+      ArrayInitialize(m_bandTrades, 0);
+      ArrayInitialize(m_bandWins, 0);
+      ArrayInitialize(m_bandNetPnL, 0.0);
    }
 
-   void RecordTradePnL(const double pnl)
+   void RecordTradeOutcome(const double pnl, const double signalScore)
    {
       int idx = m_tradeCount;
       if(idx >= ArraySize(m_tradePnLs))
          ArrayResize(m_tradePnLs, idx + 64);
       m_tradePnLs[idx] = pnl;
       m_tradeCount++;
+
+      if(signalScore >= 0.0)
+      {
+         int b = (signalScore >= 75.0) ? 2 : ((signalScore >= 60.0) ? 1 : 0);
+         m_bandTrades[b]++;
+         m_bandNetPnL[b] += pnl;
+         if(pnl >= 0.0) m_bandWins[b]++;
+      }
+   }
+
+   string GetScoreBandSummary() const
+   {
+      return StringFormat("Score<60:%d(%.0f) | 60-74:%d(%.0f) | 75+:%d(%.0f)",
+                          m_bandTrades[0], m_bandNetPnL[0],
+                          m_bandTrades[1], m_bandNetPnL[1],
+                          m_bandTrades[2], m_bandNetPnL[2]);
    }
 
    SResearchFoldInfo GetFoldTag(const datetime t) const
@@ -70,7 +97,6 @@ public:
       return info;
    }
 
-   // Deterministic seedable Monte Carlo trade-sequence resampling on actual recorded trades
    bool RunMonteCarloDrawdown95(const int iterations, double &outMedianMaxDD, double &outP95MaxDD) const
    {
       outMedianMaxDD = 0.0;
@@ -88,7 +114,6 @@ public:
       for(int it = 0; it < iters; it++)
       {
          for(int i = 0; i < m_tradeCount; i++) shuffled[i] = m_tradePnLs[i];
-         // Fisher-Yates shuffle with xorshift32
          for(int i = m_tradeCount - 1; i > 0; i--)
          {
             rng ^= (rng << 13);

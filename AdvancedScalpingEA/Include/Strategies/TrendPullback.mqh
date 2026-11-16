@@ -1,7 +1,7 @@
 //+------------------------------------------------------------------+
 //|                                                TrendPullback.mqh |
 //|                        Advanced Multi-Market MT5 Scalping EA     |
-//|                        Strategy 1: Trend Pullback Scalping       |
+//|                        v2.0.0 Strategy 1: Depth-Measured Pullback|
 //+------------------------------------------------------------------+
 #ifndef __ASEA_STRATEGIES_TRENDPULLBACK_MQH__
 #define __ASEA_STRATEGIES_TRENDPULLBACK_MQH__
@@ -18,7 +18,7 @@ public:
    CStrategyTrendPullback() : CStrategyBase(STRAT_TREND_PULLBACK, "Trend Pullback")
    {
       m_minAdx = 18.0;
-      m_pullbackAtrTol = 0.65;
+      m_pullbackAtrTol = 0.60;
    }
 
    void Configure(const bool enabled, const double slMult, const double tpMult, const int minSample,
@@ -29,10 +29,16 @@ public:
       m_pullbackAtrTol = MathMax(0.2, MathMin(1.5, pullbackAtrTol));
    }
 
-   virtual bool IsSuitableForRegime(const ENUM_MARKET_REGIME regime) const override
+   virtual ENUM_STRATEGY_SUITABILITY GetRegimeSuitability(const ENUM_MARKET_REGIME regime) const override
    {
-      return (regime == REGIME_STRONG_BULL_TREND || regime == REGIME_WEAK_BULL_TREND ||
-              regime == REGIME_STRONG_BEAR_TREND || regime == REGIME_WEAK_BEAR_TREND);
+      if(regime == REGIME_STRONG_BULL_TREND || regime == REGIME_STRONG_BEAR_TREND ||
+         regime == REGIME_ESTABLISHED_BULL || regime == REGIME_ESTABLISHED_BEAR)
+         return SUIT_SUITABLE;
+      if(regime == REGIME_WEAK_BULL_TREND || regime == REGIME_WEAK_BEAR_TREND ||
+         regime == REGIME_EARLY_TREND_BULL || regime == REGIME_EARLY_TREND_BEAR ||
+         regime == REGIME_VOL_EXPANSION)
+         return SUIT_CONDITIONAL;
+      return SUIT_UNSUITABLE;
    }
 
    virtual bool Evaluate(const SAnalysisContext &ctx, STradeSignal &outSignal, string &outRejectReason) override
@@ -43,7 +49,7 @@ public:
       if(!m_enabled) { outRejectReason = "Strategy disabled by input"; return false; }
       if(!IsSuitableForRegime(ctx.regime.regime))
       {
-         outRejectReason = "Regime not trending: " + ctx.regime.label;
+         outRejectReason = "Regime unsuitable (exhausted/non-trending): " + ctx.regime.label;
          return false;
       }
       if(!ctx.ind.isReady || !ctx.structure.isReady || ctx.ind.atr <= 0.0)
@@ -51,63 +57,95 @@ public:
          outRejectReason = "Indicators or structure not ready";
          return false;
       }
-      if(ctx.ind.adxMain < m_minAdx)
+      if(ctx.ind.adxMain < m_minAdx || ctx.ind.momentumExhaustion)
       {
-         outRejectReason = StringFormat("ADX %.1f below minimum %.1f", ctx.ind.adxMain, m_minAdx);
+         outRejectReason = StringFormat("Weak ADX (%.1f) or momentum exhaustion active", ctx.ind.adxMain);
          return false;
       }
 
       double tol = ctx.ind.atr * m_pullbackAtrTol;
-      bool bullTrend = (ctx.ind.emaFast > ctx.ind.emaMedium && ctx.ind.emaMedium > ctx.ind.emaSlow);
-      bool bearTrend = (ctx.ind.emaFast < ctx.ind.emaMedium && ctx.ind.emaMedium < ctx.ind.emaSlow);
+      bool bullStack = (ctx.ind.emaFast > ctx.ind.emaMedium && ctx.ind.emaMedium > ctx.ind.emaSlow);
+      bool bearStack = (ctx.ind.emaFast < ctx.ind.emaMedium && ctx.ind.emaMedium < ctx.ind.emaSlow);
 
-      if(bullTrend && ctx.mtf.higherBias != SIGNAL_SELL)
+      bool strongLtfTrend = (ctx.regime.regime == REGIME_STRONG_BULL_TREND || ctx.regime.regime == REGIME_ESTABLISHED_BULL ||
+                             ctx.regime.regime == REGIME_STRONG_BEAR_TREND || ctx.regime.regime == REGIME_ESTABLISHED_BEAR);
+
+      if(bullStack && ctx.structure.structureBias >= 0 && (ctx.mtf.higherBias != SIGNAL_SELL || strongLtfTrend))
       {
-         bool touchedZone = (ctx.market.low <= ctx.ind.emaMedium + tol) && (ctx.market.close > ctx.ind.emaSlow);
-         bool momentumResume = (ctx.market.close > ctx.market.open) && (ctx.ind.rsi >= 42.0 && ctx.ind.rsi <= 65.0) && (ctx.ind.stochK > ctx.ind.stochD);
-         bool structOk = (ctx.structure.structureBias >= 0);
+         // Measure pullback depth relative to recent swing range
+         double swingSpan = MathMax(ctx.ind.atr * 1.2, ctx.structure.lastSwingHigh - ctx.structure.lastSwingLow);
+         double retraceDepth = (ctx.structure.lastSwingHigh - ctx.market.low) / swingSpan;
+         bool validDepth = (retraceDepth >= 0.10 && retraceDepth <= 0.88);
+         bool touchedZone = (ctx.market.low <= ctx.ind.emaFast + tol || ctx.market.low <= ctx.ind.emaMedium + tol) &&
+                            (ctx.market.close > ctx.ind.emaSlow) &&
+                            (ctx.market.close >= ctx.ind.emaMedium - ctx.ind.atr * 0.45);
+         bool momRecovery = (ctx.market.close > ctx.market.open || ctx.candle.bias == SIGNAL_BUY) &&
+                            (ctx.candle.bias != SIGNAL_SELL) &&
+                            (ctx.ind.macdHist >= ctx.ind.prevMacdHist || ctx.ind.stochK > ctx.ind.stochD) &&
+                            (ctx.ind.rsi >= 38.0 && ctx.ind.rsi <= 70.0);
 
-         if(touchedZone && momentumResume && structOk)
+         if(validDepth && touchedZone && momRecovery)
          {
-            double slDist = MathMax(ctx.ind.atr * m_slAtrMult, (ctx.market.ask - ctx.structure.nearestSupport) + ctx.ind.atr * 0.25);
-            slDist = MathMin(slDist, ctx.ind.atr * (m_slAtrMult * 1.6));
-            double tpDist = ctx.ind.atr * m_tpAtrMult;
-            string conflict = (ctx.mtf.hasStrongConflict) ? ctx.mtf.conflictReason : "None";
-            PopulateCommonSignal(outSignal, ctx, SIGNAL_BUY, slDist, tpDist, 0.78,
-                                 "Bullish trend pullback to EMA21/structure with stochastic turn",
-                                 StringFormat("EMA9>21>55, ADX=%.1f, RSI=%.1f", ctx.ind.adxMain, ctx.ind.rsi),
-                                 ctx.structure.summary,
-                                 ctx.candle.name, conflict);
+            double slDist = ComputeStructuralSLDist(ctx, SIGNAL_BUY, m_slAtrMult, m_slAtrMult * 1.45);
+            double tpMultEff = (ctx.mtf.alignedBullish && ctx.ind.adxMain >= 24.0) ? (m_tpAtrMult * 1.25) : m_tpAtrMult;
+            double tpDist = MathMax(slDist * 1.35, ctx.ind.atr * tpMultEff);
+            PopulateCommonSignal(outSignal, ctx, SIGNAL_BUY, slDist, tpDist, 0.80,
+                                 StringFormat("Bull pullback (%.0f%% retrace) to EMA zone/structure with momentum recovery", retraceDepth * 100.0),
+                                 StringFormat("ADX=%.1f, RSI=%.1f, MACD_H slope+", ctx.ind.adxMain, ctx.ind.rsi),
+                                 ctx.structure.summary, ctx.candle.name,
+                                 ctx.mtf.hasStrongConflict ? ctx.mtf.conflictReason : "None");
             return true;
          }
-         outRejectReason = "Bull trend active but pullback/turn conditions incomplete";
+         outRejectReason = "Pullback depth or momentum recovery check failed";
          return false;
       }
 
-      if(bearTrend && ctx.mtf.higherBias != SIGNAL_BUY)
+      if(bearStack && ctx.structure.structureBias <= 0 && (ctx.mtf.higherBias != SIGNAL_BUY || strongLtfTrend))
       {
-         bool touchedZone = (ctx.market.high >= ctx.ind.emaMedium - tol) && (ctx.market.close < ctx.ind.emaSlow);
-         bool momentumResume = (ctx.market.close < ctx.market.open) && (ctx.ind.rsi <= 58.0 && ctx.ind.rsi >= 35.0) && (ctx.ind.stochK < ctx.ind.stochD);
-         bool structOk = (ctx.structure.structureBias <= 0);
+         double swingSpan = MathMax(ctx.ind.atr * 1.2, ctx.structure.lastSwingHigh - ctx.structure.lastSwingLow);
+         double retraceDepth = (ctx.market.high - ctx.structure.lastSwingLow) / swingSpan;
+         bool validDepth = (retraceDepth >= 0.10 && retraceDepth <= 0.88);
+         bool touchedZone = (ctx.market.high >= ctx.ind.emaFast - tol || ctx.market.high >= ctx.ind.emaMedium - tol) &&
+                            (ctx.market.close < ctx.ind.emaSlow) &&
+                            (ctx.market.close <= ctx.ind.emaMedium + ctx.ind.atr * 0.45);
+         bool momRecovery = (ctx.market.close < ctx.market.open || ctx.candle.bias == SIGNAL_SELL) &&
+                            (ctx.candle.bias != SIGNAL_BUY) &&
+                            (ctx.ind.macdHist <= ctx.ind.prevMacdHist || ctx.ind.stochK < ctx.ind.stochD) &&
+                            (ctx.ind.rsi <= 62.0 && ctx.ind.rsi >= 30.0);
 
-         if(touchedZone && momentumResume && structOk)
+         if(validDepth && touchedZone && momRecovery)
          {
-            double slDist = MathMax(ctx.ind.atr * m_slAtrMult, (ctx.structure.nearestResistance - ctx.market.bid) + ctx.ind.atr * 0.25);
-            slDist = MathMin(slDist, ctx.ind.atr * (m_slAtrMult * 1.6));
-            double tpDist = ctx.ind.atr * m_tpAtrMult;
-            string conflict = (ctx.mtf.hasStrongConflict) ? ctx.mtf.conflictReason : "None";
-            PopulateCommonSignal(outSignal, ctx, SIGNAL_SELL, slDist, tpDist, 0.78,
-                                 "Bearish trend pullback to EMA21/structure with stochastic turn",
-                                 StringFormat("EMA9<21<55, ADX=%.1f, RSI=%.1f", ctx.ind.adxMain, ctx.ind.rsi),
-                                 ctx.structure.summary,
-                                 ctx.candle.name, conflict);
+            double slDist = ComputeStructuralSLDist(ctx, SIGNAL_SELL, m_slAtrMult, m_slAtrMult * 1.45);
+            double tpMultEff = (ctx.mtf.alignedBearish && ctx.ind.adxMain >= 24.0) ? (m_tpAtrMult * 1.25) : m_tpAtrMult;
+            double tpDist = MathMax(slDist * 1.35, ctx.ind.atr * tpMultEff);
+            PopulateCommonSignal(outSignal, ctx, SIGNAL_SELL, slDist, tpDist, 0.80,
+                                 StringFormat("Bear pullback (%.0f%% retrace) to EMA zone/structure with momentum recovery", retraceDepth * 100.0),
+                                 StringFormat("ADX=%.1f, RSI=%.1f, MACD_H slope-", ctx.ind.adxMain, ctx.ind.rsi),
+                                 ctx.structure.summary, ctx.candle.name,
+                                 ctx.mtf.hasStrongConflict ? ctx.mtf.conflictReason : "None");
             return true;
          }
-         outRejectReason = "Bear trend active but pullback/turn conditions incomplete";
+         outRejectReason = "Pullback depth or momentum recovery check failed";
          return false;
       }
 
-      outRejectReason = "No aligned EMA stack or HTF conflict";
+      outRejectReason = "No aligned trend stack or HTF directional conflict";
+      return false;
+   }
+
+   virtual bool ShouldExitPosition(const SManagedPosition &pos, const SAnalysisContext &ctx, string &outExitReason) const override
+   {
+      if(pos.holdingSeconds < 300 || !ctx.ind.isReady) return false;
+      if(pos.direction == SIGNAL_BUY && ctx.market.close < ctx.ind.emaSlow && ctx.ind.macdHist < 0.0 && ctx.structure.lastEvent == STRUCT_CHOCH_BEAR)
+      {
+         outExitReason = "TrendPullback exit: close below EMA55 + bearish CHoCH & MACD";
+         return true;
+      }
+      if(pos.direction == SIGNAL_SELL && ctx.market.close > ctx.ind.emaSlow && ctx.ind.macdHist > 0.0 && ctx.structure.lastEvent == STRUCT_CHOCH_BULL)
+      {
+         outExitReason = "TrendPullback exit: close above EMA55 + bullish CHoCH & MACD";
+         return true;
+      }
       return false;
    }
 };

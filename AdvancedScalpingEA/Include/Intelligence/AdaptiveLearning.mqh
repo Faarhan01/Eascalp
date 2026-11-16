@@ -1,7 +1,7 @@
 //+------------------------------------------------------------------+
 //|                                             AdaptiveLearning.mqh |
 //|                        Advanced Multi-Market MT5 Scalping EA     |
-//|                        Controlled Non-Mutating Research Engine   |
+//|                        v2.0.0 5-Stage Controlled Research Engine |
 //+------------------------------------------------------------------+
 #ifndef __ASEA_INTELLIGENCE_ADAPTIVELEARNING_MQH__
 #define __ASEA_INTELLIGENCE_ADAPTIVELEARNING_MQH__
@@ -9,6 +9,7 @@
 #include "../Core/Types.mqh"
 #include "../Core/Diagnostics.mqh"
 #include "../Strategies/StrategyBase.mqh"
+#include "../Trading/TradeValidation.mqh"
 
 struct SLearningProposal
 {
@@ -23,10 +24,10 @@ struct SLearningProposal
 class CAdaptiveLearning
 {
 private:
-   bool          m_enableAdaptiveEvaluation;
-   int           m_minSamplePerRegime;
-   double        m_deteriorationPfFloor;
-   CDiagnostics *m_diag;
+   bool                 m_enableAdaptiveEvaluation;
+   int                  m_minSamplePerRegime;
+   double               m_deteriorationPfFloor;
+   CDiagnostics        *m_diag;
    SIntelligenceSummary m_summary;
    SLearningProposal    m_lastProposal;
 
@@ -46,14 +47,17 @@ public:
       m_lastProposal.validatedOutOfSample = false;
    }
 
-   void Initialize(const bool enableEval, const int minSample, const double pfFloor, CDiagnostics *diag)
+   void Initialize(const bool enableEval, const int minSample, const double pfFloor,
+                   const string activeCfgVer, CDiagnostics *diag)
    {
       m_enableAdaptiveEvaluation = enableEval;
       m_minSamplePerRegime = MathMax(15, minSample);
       m_deteriorationPfFloor = MathMax(0.5, MathMin(1.2, pfFloor));
       m_diag = diag;
       m_summary.Reset();
-      m_summary.learningStatus = m_enableAdaptiveEvaluation ? "Active (Non-Mutating Research)" : "Passive Logging Only";
+      m_summary.learningStatus = m_enableAdaptiveEvaluation ? "5-Stage Controlled (Non-Mutating)" : "Passive Logging Only";
+      m_summary.stage4ValidatedConfig = (activeCfgVer != "") ? activeCfgVer : "v2.0.0-Baseline";
+      m_summary.stage5ActiveConfig    = m_summary.stage4ValidatedConfig;
    }
 
    void RestoreCounts(const long obs, const long pat, const long reg, const long sigGen,
@@ -65,8 +69,12 @@ public:
       m_summary.signalsGenerated      = sigGen;
       m_summary.signalsAccepted       = sigAcc;
       m_summary.signalsRejected       = sigRej;
-      if(lastCfg != "") m_summary.lastValidatedConfig = lastCfg;
-      m_summary.lastValidationTime    = lastValTime;
+      if(lastCfg != "")
+      {
+         m_summary.stage4ValidatedConfig = lastCfg;
+         m_summary.stage5ActiveConfig    = lastCfg;
+      }
+      m_summary.lastValidationTime = lastValTime;
    }
 
    void RecordObservation(const bool hasPattern, const bool regimeAnalyzed)
@@ -74,6 +82,8 @@ public:
       m_summary.observationsCollected++;
       if(hasPattern) m_summary.patternsDetected++;
       if(regimeAnalyzed) m_summary.regimesAnalyzed++;
+      m_summary.stage1RawObs = StringFormat("%I64d obs | %I64d patterns | %I64d regimes",
+                                            m_summary.observationsCollected, m_summary.patternsDetected, m_summary.regimesAnalyzed);
    }
 
    void RecordSignalDecision(const bool accepted)
@@ -83,11 +93,16 @@ public:
       else         m_summary.signalsRejected++;
    }
 
-   // Controlled evaluation: detects deterioration and records proposals WITHOUT mutating risk limits
+   // Controlled 5-stage evaluation: records findings & recommendations WITHOUT silently altering live risk caps
    bool EvaluateStrategies(CStrategyBase *&strategies[], const int count, const ENUM_MARKET_REGIME curRegime,
-                           SLearningProposal &outNewProposal)
+                           const SFilterStats &fStats, const int totalClosedTrades,
+                           const string scoreBandSummary, SLearningProposal &outNewProposal)
    {
       outNewProposal.timestamp = 0;
+      m_summary.stage1RawObs = StringFormat("%I64d obs | %I64d sig (%I64d acc / %I64d rej)",
+                                            m_summary.observationsCollected, m_summary.signalsGenerated,
+                                            m_summary.signalsAccepted, m_summary.signalsRejected);
+
       if(!m_enableAdaptiveEvaluation) return false;
 
       int warnings = 0;
@@ -102,12 +117,12 @@ public:
          if(st.totalTrades >= m_minSamplePerRegime && st.profitFactor < m_deteriorationPfFloor &&
             m_lastProposal.strategyName != st.strategyName)
          {
-            outNewProposal.timestamp = TimeCurrent();
+            outNewProposal.timestamp    = TimeCurrent();
             outNewProposal.strategyName = st.strategyName;
-            outNewProposal.regimeLabel = RegimeToString(curRegime);
-            outNewProposal.finding = StringFormat("PF %.2f < %.2f across %d trades (Recent WR=%.1f%%)",
-                                                  st.profitFactor, m_deteriorationPfFloor, st.totalTrades, st.recentWinRatePct);
-            outNewProposal.proposedAction = "Flagged for walk-forward review; risk parameters unchanged";
+            outNewProposal.regimeLabel  = RegimeToString(curRegime);
+            outNewProposal.finding      = StringFormat("PF %.2f < %.2f across %d trades (Recent WR=%.1f%%)",
+                                                       st.profitFactor, m_deteriorationPfFloor, st.totalTrades, st.recentWinRatePct);
+            outNewProposal.proposedAction = "Recommend regime exclusion or walk-forward review; risk caps locked";
             outNewProposal.validatedOutOfSample = false;
             m_lastProposal = outNewProposal;
             emittedProposal = true;
@@ -118,6 +133,28 @@ public:
                           "det_" + st.strategyName, 300);
          }
       }
+
+      // Stage 2: Historical Findings
+      if(totalClosedTrades < m_minSamplePerRegime)
+      {
+         m_summary.stage2HistoricalFinding = StringFormat("Collecting min sample (%d/%d closed trades); filters: Score=%I64d, Spread=%I64d, Exp=%I64d",
+                                                          totalClosedTrades, m_minSamplePerRegime,
+                                                          fStats.rejLowScore, fStats.rejSpread, fStats.rejExpectancy);
+      }
+      else
+      {
+         m_summary.stage2HistoricalFinding = StringFormat("n=%d | %s | Rej[Score:%I64d Spread:%I64d Exp:%I64d]",
+                                                          totalClosedTrades, scoreBandSummary,
+                                                          fStats.rejLowScore, fStats.rejSpread, fStats.rejExpectancy);
+      }
+
+      // Stage 3: Recommendations
+      if(m_lastProposal.timestamp > 0)
+         m_summary.stage3Recommendation = m_lastProposal.strategyName + ": " + m_lastProposal.proposedAction;
+      else if(fStats.totalEvaluated > 20 && fStats.rejExpectancy > fStats.totalPassed)
+         m_summary.stage3Recommendation = "High expectancy/cost rejections; review broker spread or TP/SL ratio";
+      else
+         m_summary.stage3Recommendation = "No parameter change recommended";
 
       m_summary.deteriorationWarnings = warnings;
       m_summary.researchSummary = (warnings > 0)

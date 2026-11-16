@@ -1,7 +1,7 @@
 //+------------------------------------------------------------------+
 //|                                                   Statistics.mqh |
 //|                        Advanced Multi-Market MT5 Scalping EA     |
-//|                        Quantitative Ratio & Segmentation Helpers |
+//|                        v2.0.0 Quantitative & Segmented Helpers   |
 //+------------------------------------------------------------------+
 #ifndef __ASEA_ANALYTICS_STATISTICS_MQH__
 #define __ASEA_ANALYTICS_STATISTICS_MQH__
@@ -16,6 +16,8 @@ struct SSegmentedBucket
    double grossProfit;
    double grossLoss;
    double netProfit;
+   double mfeSum;
+   double maeSum;
 
    void Reset()
    {
@@ -25,6 +27,8 @@ struct SSegmentedBucket
       grossProfit = 0.0;
       grossLoss = 0.0;
       netProfit = 0.0;
+      mfeSum = 0.0;
+      maeSum = 0.0;
    }
 };
 
@@ -35,7 +39,7 @@ public:
    {
       outSharpe = 0.0;
       outSortino = 0.0;
-      if(count < 10) return false; // Require meaningful sample size
+      if(count < 10) return false;
 
       double sum = 0.0;
       for(int i = 0; i < count; i++) sum += returns[i];
@@ -82,7 +86,8 @@ public:
       return SESSION_OFF_HOURS;
    }
 
-   static void UpdateBucket(SSegmentedBucket &buckets[], int &bucketCount, const string key, const double netPnL)
+   static void UpdateBucket(SSegmentedBucket &buckets[], int &bucketCount, const string key,
+                            const double netPnL, const double mfe = 0.0, const double mae = 0.0)
    {
       for(int i = 0; i < bucketCount; i++)
       {
@@ -92,6 +97,8 @@ public:
             if(netPnL >= 0.0) { buckets[i].wins++; buckets[i].grossProfit += netPnL; }
             else              { buckets[i].grossLoss += MathAbs(netPnL); }
             buckets[i].netProfit += netPnL;
+            buckets[i].mfeSum    += mfe;
+            buckets[i].maeSum    += mae;
             return;
          }
       }
@@ -104,6 +111,8 @@ public:
          if(netPnL >= 0.0) { buckets[bucketCount].wins = 1; buckets[bucketCount].grossProfit = netPnL; }
          else              { buckets[bucketCount].grossLoss = MathAbs(netPnL); }
          buckets[bucketCount].netProfit = netPnL;
+         buckets[bucketCount].mfeSum    = mfe;
+         buckets[bucketCount].maeSum    = mae;
          bucketCount++;
       }
    }

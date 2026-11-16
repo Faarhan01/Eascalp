@@ -1,7 +1,7 @@
 //+------------------------------------------------------------------+
 //|                                                 StateManager.mqh |
 //|                        Advanced Multi-Market MT5 Scalping EA     |
-//|                        Terminal Restart State Persistence        |
+//|                        v2.0.0 Crash/Restart State Persistence    |
 //+------------------------------------------------------------------+
 #ifndef __ASEA_CORE_STATEMANAGER_MQH__
 #define __ASEA_CORE_STATEMANAGER_MQH__
@@ -34,11 +34,12 @@ struct SPersistedState
    long     signalsAccepted;
    long     signalsRejected;
    string   lastValidatedConfig;
+   string   activeConfigVersion;
    datetime lastValidationTime;
 
    void Reset()
    {
-      schemaVersion = 1;
+      schemaVersion = 2;
       magicNumber = 0;
       symbol = "";
       lastSaveTime = 0;
@@ -60,7 +61,8 @@ struct SPersistedState
       signalsGenerated = 0;
       signalsAccepted = 0;
       signalsRejected = 0;
-      lastValidatedConfig = "Default Baseline";
+      lastValidatedConfig = "ReadyToTrade_v2.2.0";
+      activeConfigVersion = "ReadyToTrade_v2.2.0";
       lastValidationTime = 0;
    }
 };
@@ -92,6 +94,11 @@ public:
    bool Initialize(const string symbol, const long magic, CDiagnostics *diag)
    {
       m_diag = diag;
+      if(MQLInfoInteger(MQL_TESTER))
+      {
+         m_stateFilePath = "";
+         return true;
+      }
       FolderCreate(EA_DATA_ROOT);
       string stateDir = StringFormat("%s\\State", EA_DATA_ROOT);
       FolderCreate(stateDir);
@@ -101,6 +108,9 @@ public:
 
    bool SaveState(const SPersistedState &state, const bool force = false)
    {
+      if(MQLInfoInteger(MQL_TESTER))
+         return true;
+
       datetime now = TimeCurrent();
       if(!force && (now - m_lastFlushTime) < 15)
          return true;
@@ -112,7 +122,7 @@ public:
       if(handle == INVALID_HANDLE)
       {
          if(m_diag != NULL)
-            m_diag.Log(LOG_ERROR, "StateManager", StringFormat("Failed to open state file for write: %s (err=%d)", m_stateFilePath, GetLastError()), "state_write_err", 60);
+            m_diag.Log(LOG_ERROR, "StateManager", StringFormat("Failed to open state file: %s (err=%d)", m_stateFilePath, GetLastError()), "state_write_err", 60);
          return false;
       }
 
@@ -139,6 +149,7 @@ public:
       FileWriteString(handle, StringFormat("signalsAccepted=%I64d\r\n", state.signalsAccepted));
       FileWriteString(handle, StringFormat("signalsRejected=%I64d\r\n", state.signalsRejected));
       FileWriteString(handle, StringFormat("lastValidatedConfig=%s\r\n", SanitizeValue(state.lastValidatedConfig)));
+      FileWriteString(handle, StringFormat("activeConfigVersion=%s\r\n", SanitizeValue(state.activeConfigVersion)));
       FileWriteString(handle, StringFormat("lastValidationTime=%I64d\r\n", (long)state.lastValidationTime));
 
       FileClose(handle);
@@ -149,6 +160,8 @@ public:
    bool LoadState(SPersistedState &state)
    {
       state.Reset();
+      if(MQLInfoInteger(MQL_TESTER))
+         return false;
       if(m_stateFilePath == "" || !FileIsExist(m_stateFilePath))
          return false;
 
@@ -188,12 +201,13 @@ public:
          else if(key == "signalsAccepted")    state.signalsAccepted = StringToInteger(val);
          else if(key == "signalsRejected")    state.signalsRejected = StringToInteger(val);
          else if(key == "lastValidatedConfig") state.lastValidatedConfig = val;
+         else if(key == "activeConfigVersion") state.activeConfigVersion = val;
          else if(key == "lastValidationTime") state.lastValidationTime = (datetime)StringToInteger(val);
       }
       FileClose(handle);
 
       if(m_diag != NULL)
-         m_diag.Log(LOG_INFO, "StateManager", StringFormat("Restored EA state from %s (PeakEq=%.2f, ConsecLoss=%d)", m_stateFilePath, state.peakEquity, state.consecutiveLosses));
+         m_diag.Log(LOG_INFO, "StateManager", StringFormat("Restored v2 state from %s (PeakEq=%.2f, ConsecLoss=%d)", m_stateFilePath, state.peakEquity, state.consecutiveLosses));
       return true;
    }
 };

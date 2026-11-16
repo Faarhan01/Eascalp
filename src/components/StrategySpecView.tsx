@@ -1,88 +1,19 @@
 import { useMemo, useState } from 'react';
 import { Search } from 'lucide-react';
-import type { ParsedInputParam } from '../types/project';
+import type { ProjectSummary } from '../types/project';
 
 interface StrategySpecViewProps {
-  inputs: ParsedInputParam[];
+  summary: ProjectSummary | null;
 }
 
-const STRATEGIES = [
-  {
-    id: 1,
-    name: 'Trend Pullback',
-    module: 'TrendPullback.mqh',
-    regimes: 'Strong/Weak Bull or Bear Trend',
-    logic: 'Aligned EMA(9/21/55) stack, ADX >= 18, pullback into EMA21/structure zone, Stochastic turn + RSI confirmation.',
-    filters: 'Blocks counter-trend entries opposing Higher Timeframe bias.',
-  },
-  {
-    id: 2,
-    name: 'Momentum Scalping',
-    module: 'MomentumScalping.mqh',
-    regimes: 'Trends & Volatility Expansion',
-    logic: 'MACD histogram alignment, ROC threshold, directional DI dominance, RSI momentum zone, and positive tick micro-bias.',
-    filters: 'Rejects entries when strong MTF conflicts are active.',
-  },
-  {
-    id: 3,
-    name: 'Breakout Scalping',
-    module: 'BreakoutScalping.mqh',
-    regimes: 'All non-unstable, non-low-vol regimes',
-    logic: 'Confirmed closed-bar BOS, range breakout, or chart pattern neckline break with candle body >= 0.45x ATR.',
-    filters: 'Requires ATR ratio >= 1.05 or tick activity >= 1.15x to filter fakeouts.',
-  },
-  {
-    id: 4,
-    name: 'Reversal Scalping',
-    module: 'ReversalScalping.mqh',
-    regimes: 'Non-unstable regimes (blocks fading strong trends)',
-    logic: 'CHoCH / liquidity sweep / S&R rejection + context-validated reversal candle + RSI/CCI/BB extreme.',
-    filters: 'Explicitly blocked against Strong Bull/Bear runaway trends.',
-  },
-  {
-    id: 5,
-    name: 'Range Scalping',
-    module: 'RangeScalping.mqh',
-    regimes: 'Sideways, Consolidation, Low Volatility, Contraction',
-    logic: 'Mean reversion at confirmed range/Bollinger boundaries with oversold/overbought Stochastic & RSI.',
-    filters: 'Strictly disabled whenever ADX > 22 or trending regimes are active.',
-  },
-  {
-    id: 6,
-    name: 'Volatility Expansion',
-    module: 'VolatilityExpansion.mqh',
-    regimes: 'Volatility Expansion, High Vol, Strong Trends',
-    logic: 'ATR ratio >= 1.25 expansion breaking outer Bollinger Band with impulse body >= 0.55x ATR and tick surge.',
-    filters: 'Requires MACD histogram and tick micro-trend alignment.',
-  },
-  {
-    id: 7,
-    name: 'Micro-Momentum',
-    module: 'MicroMomentum.mqh',
-    regimes: 'Active non-unstable, non-low-vol markets',
-    logic: 'Consecutive tick directional runs + tick velocity (pts/sec) + positive acceleration + EMA fast alignment.',
-    filters: 'Enforces spread-to-ATR cost ceiling (<= 18%) and spread-spike lockout.',
-  },
-];
-
-const SCORING_COMPONENTS = [
-  { name: 'Market Direction (EMA Stack)', weight: '10 pts' },
-  { name: 'Market Structure & BOS/CHoCH', weight: '12 pts' },
-  { name: 'Trend Strength (ADX / Range Fit)', weight: '10 pts' },
-  { name: 'Momentum (MACD / RSI / ROC)', weight: '10 pts' },
-  { name: 'Volatility Regime Suitability', weight: '8 pts' },
-  { name: 'Candlestick Context Confirmation', weight: '8 pts' },
-  { name: 'Chart Pattern Alignment', weight: '8 pts' },
-  { name: 'Multi-Timeframe Agreement', weight: '12 pts' },
-  { name: 'Tick Velocity & Micro-Bias', weight: '8 pts' },
-  { name: 'Spread Cost Ratio', weight: '6 pts' },
-  { name: 'Strategy Historical PF (Sample-Gated)', weight: '4 pts' },
-  { name: 'Regime Suitability Match', weight: '4 pts' },
-];
-
-export default function StrategySpecView({ inputs }: StrategySpecViewProps) {
+export default function StrategySpecView({ summary }: StrategySpecViewProps) {
   const [query, setQuery] = useState('');
   const [groupFilter, setGroupFilter] = useState('ALL');
+
+  const inputs = summary?.inputs ?? [];
+  const strategies = summary?.strategies ?? [];
+  const scoringComponents = summary?.scoringComponents ?? [];
+  const totalScorePoints = scoringComponents.reduce((acc, c) => acc + c.maxPoints, 0);
 
   const groups = useMemo(() => {
     const set = new Set<string>();
@@ -110,15 +41,18 @@ export default function StrategySpecView({ inputs }: StrategySpecViewProps) {
           Scalping Strategies, Signal Scoring &amp; Configuration Inputs
         </h1>
         <p className="mt-1 text-xs text-slate-400">
-          Every strategy evaluates opportunities independently, logs acceptance or rejection reasons, and submits candidate signals to the 100-point quantitative scoring and 11-point trade validation gates.
+          All strategy specifications, scoring weights, and EA inputs below are parsed directly from{' '}
+          <span className="font-mono text-slate-300">Include/Strategies/*.mqh</span>,{' '}
+          <span className="font-mono text-slate-300">Include/Core/Types.mqh</span>, and{' '}
+          <span className="font-mono text-slate-300">Experts/AdvancedScalpingEA.mq5</span>.
         </p>
       </div>
 
-      {/* 7 Strategies Table */}
+      {/* Live Parsed Strategies Table */}
       <div className="rounded-lg border border-slate-800 bg-slate-900/60 overflow-hidden">
         <div className="border-b border-slate-800 px-5 py-3.5">
           <h2 className="font-display text-sm font-semibold text-slate-100">
-            Seven Independent Scalping Strategy Engines
+            Independent Scalping Strategy Engines ({strategies.length})
           </h2>
         </div>
         <div className="overflow-x-auto">
@@ -127,22 +61,35 @@ export default function StrategySpecView({ inputs }: StrategySpecViewProps) {
               <tr>
                 <th className="px-4 py-3 font-medium">#</th>
                 <th className="px-4 py-3 font-medium">Strategy</th>
-                <th className="px-4 py-3 font-medium">Permitted Regimes</th>
-                <th className="px-4 py-3 font-medium">Entry &amp; Confirmation Logic</th>
-                <th className="px-4 py-3 font-medium">Safety / Context Filter</th>
+                <th className="px-4 py-3 font-medium">Suitable Regimes</th>
+                <th className="px-4 py-3 font-medium">Conditional Regimes</th>
+                <th className="px-4 py-3 font-medium">Calibrated Thresholds &amp; Hooks</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800/70">
-              {STRATEGIES.map((s) => (
-                <tr key={s.id} className="hover:bg-slate-800/30">
+              {strategies.map((s) => (
+                <tr key={s.enumKey || s.id} className="hover:bg-slate-800/30">
                   <td className="px-4 py-3 font-mono text-slate-500 tabular-nums align-top">{s.id}</td>
                   <td className="px-4 py-3 align-top">
                     <p className="font-medium text-slate-200 whitespace-nowrap">{s.name}</p>
                     <p className="font-mono text-[11px] text-sky-400">{s.module}</p>
                   </td>
-                  <td className="px-4 py-3 text-slate-300 align-top">{s.regimes}</td>
-                  <td className="px-4 py-3 text-slate-400 leading-relaxed align-top">{s.logic}</td>
-                  <td className="px-4 py-3 text-slate-400 leading-relaxed align-top">{s.filters}</td>
+                  <td className="px-4 py-3 text-slate-300 leading-relaxed align-top">
+                    {s.suitableRegimes.length > 0 ? s.suitableRegimes.join(', ') : '—'}
+                  </td>
+                  <td className="px-4 py-3 text-slate-400 leading-relaxed align-top">
+                    {s.conditionalRegimes.length > 0 ? s.conditionalRegimes.join(', ') : '—'}
+                  </td>
+                  <td className="px-4 py-3 font-mono text-[11px] text-slate-300 leading-relaxed align-top">
+                    <div>
+                      {s.defaults.length > 0
+                        ? s.defaults.map((d) => `${d.key}=${d.value}`).join(' · ')
+                        : 'Base ATR risk defaults'}
+                    </div>
+                    <div className="mt-1 font-sans text-slate-500">
+                      {s.hasCustomExit ? 'Includes custom ShouldExitPosition() hook' : 'Managed exits'}
+                    </div>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -150,27 +97,30 @@ export default function StrategySpecView({ inputs }: StrategySpecViewProps) {
         </div>
       </div>
 
-      {/* 100-Point Scoring Breakdown */}
+      {/* Live Parsed Scoring Breakdown */}
       <div className="rounded-lg border border-slate-800 bg-slate-900/60 p-5">
         <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
           <h2 className="font-display text-sm font-semibold text-slate-100">
-            12-Component Signal Scoring Matrix (0–100 Scale)
+            {scoringComponents.length}-Component Signal Scoring Matrix (0–{totalScorePoints} Scale)
           </h2>
-          <span className="font-mono text-xs text-slate-400">
-            Default Execution Threshold: 62.0 / 100
+          <span className="font-mono text-xs text-emerald-400 tabular-nums">
+            Default Threshold: {summary ? summary.defaultMinScore.toFixed(1) : '—'} / {totalScorePoints}
           </span>
         </div>
         <p className="mt-1 text-xs text-slate-400">
-          Scores classify conditions into Strong/Moderate/Weak Bullish, Neutral, or Weak/Moderate/Strong Bearish bands and never claim guaranteed win probabilities.
+          Parsed directly from <span className="font-mono text-slate-300">struct SScoreBreakdown</span> in{' '}
+          <span className="font-mono text-slate-300">Types.mqh</span>. Weights sum to {totalScorePoints} points.
         </p>
-        <div className="mt-4 grid gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
-          {SCORING_COMPONENTS.map((comp) => (
+        <div className="mt-4 grid gap-2.5 sm:grid-cols-2 lg:grid-cols-5">
+          {scoringComponents.map((comp) => (
             <div
-              key={comp.name}
-              className="flex items-center justify-between rounded-md border border-slate-800/80 bg-slate-950/50 px-3.5 py-2.5 text-xs"
+              key={comp.field}
+              className="flex items-center justify-between gap-2 rounded-md border border-slate-800/80 bg-slate-950/50 px-3 py-2.5 text-xs"
             >
-              <span className="text-slate-300">{comp.name}</span>
-              <span className="font-mono font-medium text-sky-400 tabular-nums">{comp.weight}</span>
+              <span className="text-slate-300">{comp.label}</span>
+              <span className="font-mono font-medium text-sky-400 tabular-nums shrink-0">
+                {comp.maxPoints} pts
+              </span>
             </div>
           ))}
         </div>
@@ -195,7 +145,7 @@ export default function StrategySpecView({ inputs }: StrategySpecViewProps) {
             >
               {groups.map((g) => (
                 <option key={g} value={g}>
-                  {g === 'ALL' ? 'All 18 Input Groups' : g}
+                  {g === 'ALL' ? `All ${Math.max(0, groups.length - 1)} Input Groups` : g}
                 </option>
               ))}
             </select>

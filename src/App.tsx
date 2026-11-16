@@ -44,14 +44,23 @@ export default function App() {
   const breadcrumbLabel =
     NAV_ITEMS.find((item) => item.id === activeTab)?.label ?? 'Architecture';
 
+  const shortModeLabel = summary
+    ? summary.defaultMode.replace(/^EA_MODE_/, '')
+    : 'Loading...';
+
   return (
     <div className="min-h-screen bg-[#0B1120] text-slate-100 flex flex-col lg:flex-row">
       {/* Left Workspace Sidebar */}
       <aside className="w-full shrink-0 border-b border-slate-800 bg-[#0F172A] lg:w-64 lg:border-b-0 lg:border-r">
-        <div className="flex h-14 items-center border-b border-slate-800 px-5">
+        <div className="flex h-14 items-center justify-between border-b border-slate-800 px-5">
           <span className="font-display text-base font-bold tracking-tight text-slate-100 whitespace-nowrap">
-            ApexQuant MT5
+            {summary?.eaName ?? 'AdvancedScalpingEA'}
           </span>
+          {summary && (
+            <span className="font-mono text-[11px] text-sky-400 tabular-nums">
+              v{summary.version}
+            </span>
+          )}
         </div>
 
         <nav className="flex overflow-x-auto p-3 gap-1 lg:flex-col lg:overflow-visible">
@@ -79,7 +88,23 @@ export default function App() {
         <div className="hidden lg:block px-5 pt-4 mt-4 border-t border-slate-800/80 text-xs text-slate-500 space-y-2">
           <p className="font-medium text-slate-300">Read-Only Companion</p>
           <p className="leading-relaxed">
-            Default EA Mode: <span className="font-mono text-emerald-400">RESEARCH_ONLY</span>. Live trading remains disabled by default.
+            Default EA Mode:{' '}
+            <span
+              className={`font-mono ${
+                summary?.liveTradingDefault ? 'text-emerald-400' : 'text-amber-400'
+              }`}
+            >
+              {shortModeLabel}
+            </span>
+            {summary && (
+              <>
+                {' '}
+                ·{' '}
+                {summary.liveTradingDefault
+                  ? 'Trading enabled out-of-the-box.'
+                  : 'Execution gated by inputs.'}
+              </>
+            )}
           </p>
         </div>
       </aside>
@@ -89,7 +114,7 @@ export default function App() {
         {/* Top Bar Contract: Breadcrumb on left, 1 primary CTA on right */}
         <header className="flex h-14 items-center justify-between gap-8 border-b border-slate-800 bg-[#0F172A]/80 px-6 shrink-0">
           <div className="flex items-center gap-2 text-xs text-slate-400 truncate">
-            <span className="text-slate-500">AdvancedScalpingEA</span>
+            <span className="text-slate-500">{summary?.eaName ?? 'AdvancedScalpingEA'}</span>
             <span aria-hidden="true">/</span>
             <span className="font-medium text-slate-200 truncate">{breadcrumbLabel}</span>
           </div>
@@ -109,11 +134,11 @@ export default function App() {
             <OverviewView summary={summary} onNavigate={setActiveTab} />
           )}
           {activeTab === 'explorer' && <CodeExplorerView files={files} />}
-          {activeTab === 'strategies' && (
-            <StrategySpecView inputs={summary?.inputs ?? []} />
+          {activeTab === 'strategies' && <StrategySpecView summary={summary} />}
+          {activeTab === 'terminal' && (
+            <PerformanceTerminalView csvSchemas={summary?.csvSchemas ?? []} />
           )}
-          {activeTab === 'terminal' && <PerformanceTerminalView />}
-          {activeTab === 'validation' && <ValidationReportView />}
+          {activeTab === 'validation' && <ValidationReportView summary={summary} />}
         </main>
       </div>
     </div>

@@ -1,7 +1,7 @@
 //+------------------------------------------------------------------+
 //|                                               MultiTimeframe.mqh |
 //|                        Advanced Multi-Market MT5 Scalping EA     |
-//|                        Multi-Timeframe Alignment & Conflict Check|
+//|                        v2.0.0 Weighted MTF Context Engine        |
 //+------------------------------------------------------------------+
 #ifndef __ASEA_MARKET_MULTITIMEFRAME_MQH__
 #define __ASEA_MARKET_MULTITIMEFRAME_MQH__
@@ -21,6 +21,16 @@ private:
    int             m_hEmaFastMid, m_hEmaSlowMid, m_hRsiMid;
    CDiagnostics   *m_diag;
    SMTFAnalysis    m_analysis;
+   datetime        m_lastHtfBar;
+   datetime        m_lastItfBar;
+   bool            m_htfInitDone;
+   bool            m_itfInitDone;
+   ENUM_SIGNAL_DIRECTION m_cachedHtfBias;
+   ENUM_SIGNAL_DIRECTION m_cachedItfBias;
+
+   double          m_weightHTF;
+   double          m_weightITF;
+   double          m_weightLTF;
 
    ENUM_SIGNAL_DIRECTION EvaluateTFBias(const int hFast, const int hSlow, const int hExtra, const bool isAdx) const
    {
@@ -32,7 +42,6 @@ private:
       ArraySetAsSeries(slow, true);
       ArraySetAsSeries(extra, true);
 
-      // Copy shift=1 (completed bar) to eliminate repainting
       if(CopyBuffer(hFast, 0, 1, 2, fast) < 2 || CopyBuffer(hSlow, 0, 1, 2, slow) < 2)
          return SIGNAL_NONE;
 
@@ -76,6 +85,10 @@ public:
       m_hEmaFastHigh = INVALID_HANDLE; m_hEmaSlowHigh = INVALID_HANDLE; m_hAdxHigh = INVALID_HANDLE;
       m_hEmaFastMid  = INVALID_HANDLE; m_hEmaSlowMid  = INVALID_HANDLE; m_hRsiMid  = INVALID_HANDLE;
       m_diag = NULL;
+      m_lastHtfBar = 0; m_lastItfBar = 0;
+      m_htfInitDone = false; m_itfInitDone = false;
+      m_cachedHtfBias = SIGNAL_NONE; m_cachedItfBias = SIGNAL_NONE;
+      m_weightHTF = 0.45; m_weightITF = 0.35; m_weightLTF = 0.20;
       m_analysis.Reset();
    }
 
@@ -94,6 +107,14 @@ public:
       if(m_hRsiMid      != INVALID_HANDLE) { IndicatorRelease(m_hRsiMid);      m_hRsiMid      = INVALID_HANDLE; }
    }
 
+   void ConfigureWeights(const double wHtf, const double wItf, const double wLtf)
+   {
+      double sum = MathMax(0.01, wHtf + wItf + wLtf);
+      m_weightHTF = wHtf / sum;
+      m_weightITF = wItf / sum;
+      m_weightLTF = wLtf / sum;
+   }
+
    bool Initialize(const string symbol, const ENUM_TIMEFRAMES higherTF, const ENUM_TIMEFRAMES interTF,
                    const ENUM_TIMEFRAMES lowerTF, CDiagnostics *diag)
    {
@@ -103,6 +124,9 @@ public:
       m_intermediateTF = interTF;
       m_lowerTF = lowerTF;
       m_diag = diag;
+      m_lastHtfBar = 0; m_lastItfBar = 0;
+      m_htfInitDone = false; m_itfInitDone = false;
+      m_cachedHtfBias = SIGNAL_NONE; m_cachedItfBias = SIGNAL_NONE;
 
       m_hEmaFastHigh = iMA(m_symbol, m_higherTF, 21, 0, MODE_EMA, PRICE_CLOSE);
       m_hEmaSlowHigh = iMA(m_symbol, m_higherTF, 55, 0, MODE_EMA, PRICE_CLOSE);
@@ -116,13 +140,13 @@ public:
          m_hEmaFastMid  == INVALID_HANDLE || m_hEmaSlowMid  == INVALID_HANDLE)
       {
          if(m_diag != NULL)
-            m_diag.Log(LOG_WARN, "MultiTimeframe", "One or more MTF indicator handles failed to create; degraded mode active.");
+            m_diag.Log(LOG_WARN, "MultiTimeframe", "MTF handle init degraded on " + m_symbol);
          return false;
       }
       return true;
    }
 
-   bool Evaluate(const CMarketData &data, const SIndicatorValues &lowerInd, const STickMetrics &ticks)
+   bool Evaluate(const CMarketData &data, const SIndicatorValues &lowerInd, const SStructureState &structure)
    {
       m_analysis.Reset();
       m_analysis.higherTF       = m_higherTF;
@@ -132,13 +156,29 @@ public:
       if(!lowerInd.isReady)
          return false;
 
-      if(data.HasSufficientHistory(m_higherTF, 60))
-         m_analysis.higherBias = EvaluateTFBias(m_hEmaFastHigh, m_hEmaSlowHigh, m_hAdxHigh, true);
+      // Cached HTF evaluation (only recompute when HTF closed bar updates or warmup completes)
+      datetime htfBar = iTime(m_symbol, m_higherTF, 0);
+      if(htfBar > 0 && (htfBar != m_lastHtfBar || !m_htfInitDone) &&
+         data.HasSufficientHistory(m_higherTF, 35) && BarsCalculated(m_hEmaSlowHigh) >= 4)
+      {
+         m_cachedHtfBias = EvaluateTFBias(m_hEmaFastHigh, m_hEmaSlowHigh, m_hAdxHigh, true);
+         m_lastHtfBar = htfBar;
+         m_htfInitDone = true;
+      }
+      m_analysis.higherBias = m_cachedHtfBias;
 
-      if(data.HasSufficientHistory(m_intermediateTF, 60))
-         m_analysis.intermediateBias = EvaluateTFBias(m_hEmaFastMid, m_hEmaSlowMid, m_hRsiMid, false);
+      // Cached ITF evaluation
+      datetime itfBar = iTime(m_symbol, m_intermediateTF, 0);
+      if(itfBar > 0 && (itfBar != m_lastItfBar || !m_itfInitDone) &&
+         data.HasSufficientHistory(m_intermediateTF, 35) && BarsCalculated(m_hEmaSlowMid) >= 4)
+      {
+         m_cachedItfBias = EvaluateTFBias(m_hEmaFastMid, m_hEmaSlowMid, m_hRsiMid, false);
+         m_lastItfBar = itfBar;
+         m_itfInitDone = true;
+      }
+      m_analysis.intermediateBias = m_cachedItfBias;
 
-      // Lower TF bias from primary indicator engine
+      // LTF bias
       if(lowerInd.emaFast > lowerInd.emaSlow && lowerInd.macdHist >= 0.0)
          m_analysis.lowerBias = SIGNAL_BUY;
       else if(lowerInd.emaFast < lowerInd.emaSlow && lowerInd.macdHist <= 0.0)
@@ -146,43 +186,44 @@ public:
       else
          m_analysis.lowerBias = SIGNAL_NONE;
 
-      // Calculate agreement score (0..100) and conflict detection
-      int sum = (int)m_analysis.higherBias + (int)m_analysis.intermediateBias + (int)m_analysis.lowerBias;
-      if(sum == 3)
+      double wScore = ((double)m_analysis.higherBias * m_weightHTF +
+                       (double)m_analysis.intermediateBias * m_weightITF +
+                       (double)m_analysis.lowerBias * m_weightLTF) * 100.0;
+      m_analysis.weightedScore  = wScore;
+      m_analysis.agreementScore = MathAbs(wScore);
+      m_analysis.alignedBullish = (wScore >= 40.0);
+      m_analysis.alignedBearish = (wScore <= -40.0);
+
+      // Structural contradiction check
+      if((m_analysis.higherBias == SIGNAL_BUY && structure.structureBias < 0) ||
+         (m_analysis.higherBias == SIGNAL_SELL && structure.structureBias > 0))
       {
-         m_analysis.alignedBullish = true;
-         m_analysis.agreementScore = (ticks.microTrendBias >= 0.0) ? 100.0 : 88.0;
-      }
-      else if(sum == -3)
-      {
-         m_analysis.alignedBearish = true;
-         m_analysis.agreementScore = (ticks.microTrendBias <= 0.0) ? 100.0 : 88.0;
-      }
-      else if(MathAbs(sum) == 2)
-      {
-         m_analysis.agreementScore = 72.0;
-         if(sum > 0) m_analysis.alignedBullish = true;
-         else        m_analysis.alignedBearish = true;
-      }
-      else
-      {
-         m_analysis.agreementScore = 35.0;
+         m_analysis.ltfContradictsHtfStructure = true;
       }
 
-      // Strong conflict: Higher TF and Intermediate TF explicitly oppose each other, or Lower TF strongly opposes Higher TF
       if((m_analysis.higherBias == SIGNAL_BUY && m_analysis.intermediateBias == SIGNAL_SELL) ||
          (m_analysis.higherBias == SIGNAL_SELL && m_analysis.intermediateBias == SIGNAL_BUY))
       {
          m_analysis.hasStrongConflict = true;
+         m_analysis.assessment = MTF_CONFLICTING;
          m_analysis.conflictReason = StringFormat("HTF (%s) opposes ITF (%s)", EnumToString(m_higherTF), EnumToString(m_intermediateTF));
-         m_analysis.agreementScore = MathMin(m_analysis.agreementScore, 25.0);
+         m_analysis.assessmentSummary = "Conflicting: " + m_analysis.conflictReason;
       }
-      else if((m_analysis.higherBias == SIGNAL_BUY && m_analysis.lowerBias == SIGNAL_SELL) ||
-              (m_analysis.higherBias == SIGNAL_SELL && m_analysis.lowerBias == SIGNAL_BUY))
+      else if(m_analysis.higherBias == m_analysis.intermediateBias && m_analysis.higherBias != SIGNAL_NONE &&
+              m_analysis.lowerBias == m_analysis.higherBias)
       {
-         m_analysis.hasStrongConflict = true;
-         m_analysis.conflictReason = StringFormat("LTF (%s) opposes HTF (%s)", EnumToString(m_lowerTF), EnumToString(m_higherTF));
-         m_analysis.agreementScore = MathMin(m_analysis.agreementScore, 40.0);
+         m_analysis.assessment = MTF_STRONG_AGREEMENT;
+         m_analysis.assessmentSummary = StringFormat("Strong %s agreement across HTF/ITF/LTF", DirectionToString(m_analysis.higherBias));
+      }
+      else if(MathAbs(wScore) >= 40.0)
+      {
+         m_analysis.assessment = MTF_PARTIAL_AGREEMENT;
+         m_analysis.assessmentSummary = StringFormat("Partial %s agreement (w=%.0f)", wScore > 0 ? "Bullish" : "Bearish", wScore);
+      }
+      else
+      {
+         m_analysis.assessment = MTF_NEUTRAL;
+         m_analysis.assessmentSummary = "Neutral / Mixed TF bias";
       }
 
       m_analysis.isReady = true;

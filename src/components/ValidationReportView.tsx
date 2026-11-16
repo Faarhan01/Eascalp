@@ -1,19 +1,42 @@
-export default function ValidationReportView() {
+import type { ProjectSummary } from '../types/project';
+
+interface ValidationReportViewProps {
+  summary: ProjectSummary | null;
+}
+
+export default function ValidationReportView({ summary }: ValidationReportViewProps) {
+  const versionLabel = summary ? `v${summary.version}` : '';
+  const mqlBreakdown = summary
+    ? `${summary.mqlCount} MQL5 source files (${summary.mq5Count} .mq5 + ${summary.mqhCount} .mqh headers), ${summary.maxSymbols}-symbol SymbolContext isolation, ${summary.maxRegimes} regimes, and ${summary.strategies.length} independent strategies.`
+    : 'Loading workspace metrics...';
+
   const checklist = [
     {
-      item: 'Complete Native MQL5 Modular Codebase',
+      item: `Complete Native MQL5 ${versionLabel} Codebase`,
       status: 'Implemented',
-      note: '38 MQL5 source files (.mq5 + .mqh) with verified include graph, include guards, and zero placeholder stubs.',
+      note: mqlBreakdown,
     },
     {
-      item: 'Research & Demo Safety Configuration',
+      item: 'Universal Symbol Intelligence & Execution Fallback',
       status: 'Implemented',
-      note: 'InpOperatingMode defaults to EA_MODE_RESEARCH_ONLY; live real-money execution requires explicit opt-in via two confirmation flags.',
+      note: summary
+        ? `Default mode ${summary.defaultMode} (AllowLive=${String(summary.allowLiveTrading)}, Ack=${String(summary.confirmLiveRiskAck)}); auto-detects Forex/Metals/Indices/Crypto/Synthetics with adaptive spread caps, 3-mode IOC/FOK/RETURN fallback, and Hedging/Netting resolution.`
+        : 'Loading execution settings...',
+    },
+    {
+      item: 'Structural Stops, Anti-Martingale Risk & Chandelier Trailing',
+      status: 'Implemented',
+      note: 'Anchors SL beyond swing/S/R zones; scales risk by equity DD and losing streaks with margin-safe clamping; manages cost-covering BE, restart-safe partial closes, and progressive Chandelier trailing.',
+    },
+    {
+      item: '5-Stage Controlled Adaptive Learning',
+      status: 'Implemented',
+      note: 'Separates data collection, edge evaluation, out-of-sample proposal generation, OOS validation gating, and version-tracked activation without silent live self-rewriting.',
     },
     {
       item: 'Strictly Read-Only Chart Dashboard',
       status: 'Implemented',
-      note: 'CDashboardManager accepts const snapshots only; passive page tabs and CCanvas charts cannot alter trading or risk state.',
+      note: 'CDashboardManager accepts const snapshots only and derives labels, account currency, Algo status, and sample targets dynamically across 6 tabs and 5 CCanvas charts.',
     },
     {
       item: 'MetaEditor 5 .ex5 Binary Compilation',
@@ -21,35 +44,22 @@ export default function ValidationReportView() {
       note: 'MetaEditor 5 (metaeditor64.exe) is a Windows desktop compiler not present in this Linux container; compile Experts/AdvancedScalpingEA.mq5 in MetaEditor 5.',
     },
     {
-      item: 'Real-Tick Strategy Tester & Walk-Forward Validation',
+      item: 'Real-Tick Strategy Tester & Live Execution Verification',
       status: 'Requires Local MT5',
-      note: 'Execute multi-symbol, multi-timeframe real-tick tests using Presets/ and upload exported CSVs into the Performance Terminal.',
+      note: `Attach with MT5 Algo Trading enabled or test across the ${summary ? summary.presetCount : '—'} Presets/ files and inspect exported CSVs in the CSV Terminal.`,
     },
   ];
 
-  const csvExports = [
-    'market_observations.csv',
-    'tick_analysis.csv',
-    'market_regimes.csv',
-    'detected_patterns.csv',
-    'strategy_signals.csv',
-    'rejected_signals.csv',
-    'trade_history.csv',
-    'strategy_performance.csv',
-    'risk_events.csv',
-    'learning_history.csv',
-    'configuration_history.csv',
-    'session_summary.csv',
-  ];
+  const csvSchemas = summary?.csvSchemas ?? [];
 
   return (
     <div className="space-y-8">
       <div className="border-b border-slate-800 pb-4">
         <h1 className="font-display text-xl font-semibold text-slate-100">
-          Testing Protocol, Development Report &amp; Known Limitations
+          Testing Protocol, Development Report &amp; Diagnostics {versionLabel}
         </h1>
         <p className="mt-1 text-xs text-slate-400">
-          Transparent engineering summary of what has been implemented in the MQL5 codebase and what requires execution inside MetaTrader 5.
+          Live-parsed engineering summary of the {summary?.eaName ?? 'AdvancedScalpingEA'} MQL5 codebase and local MetaTrader 5 verification steps.
         </p>
       </div>
 
@@ -62,7 +72,7 @@ export default function ValidationReportView() {
         </div>
         <div className="divide-y divide-slate-800/70">
           {checklist.map((row) => (
-            <div key={row.item} className="grid gap-2 px-5 py-3.5 sm:grid-cols-[240px_140px_1fr] sm:items-center">
+            <div key={row.item} className="grid gap-2 px-5 py-3.5 sm:grid-cols-[270px_140px_1fr] sm:items-center">
               <span className="text-xs font-medium text-slate-200">{row.item}</span>
               <span
                 className={`font-mono text-xs ${
@@ -77,42 +87,45 @@ export default function ValidationReportView() {
         </div>
       </div>
 
-      {/* Strategy Tester Protocol */}
+      {/* Strategy Tester Protocol & Dynamic CSV Schemas */}
       <div className="grid gap-6 lg:grid-cols-2">
         <div className="rounded-lg border border-slate-800 bg-slate-900/60 p-5 space-y-3">
           <h2 className="font-display text-sm font-semibold text-slate-100">
-            MT5 Strategy Tester Validation Protocol
+            MT5 Strategy Tester &amp; Live Checklist
           </h2>
           <ul className="space-y-2.5 text-xs leading-relaxed text-slate-400">
             <li>
-              <span className="font-medium text-slate-200">1. Real-Tick Modeling:</span> Select &ldquo;Every tick based on real ticks&rdquo; with realistic broker spread and commission settings.
+              <span className="font-medium text-slate-200">1. Algo Trading &amp; Mode:</span> Ensure MT5 toolbar <span className="text-slate-200">Algo Trading</span> is enabled. Default <span className="font-mono text-slate-300">InpOperatingMode = EA_MODE_LIVE_TRADING</span> executes on Live, Demo, and Strategy Tester accounts immediately.
             </li>
             <li>
-              <span className="font-medium text-slate-200">2. Independent Strategy Isolation:</span> Enable one strategy input at a time (<span className="font-mono text-slate-300">InpEnableTrendPullback</span>, etc.) and compare against a no-trade baseline.
+              <span className="font-medium text-slate-200">2. Real-Tick Modeling:</span> Select &ldquo;Every tick based on real ticks&rdquo; with realistic broker spread and slippage settings.
             </li>
             <li>
-              <span className="font-medium text-slate-200">3. Out-of-Sample &amp; Walk-Forward Splits:</span> Reserve 30% unseen data (<span className="font-mono text-slate-300">InpOosSplitRatio = 0.30</span>); CSV outputs automatically tag <span className="font-mono text-slate-300">IN_SAMPLE</span> vs <span className="font-mono text-slate-300">OUT_OF_SAMPLE</span> folds.
+              <span className="font-medium text-slate-200">3. Out-of-Sample &amp; Score-Band Splits:</span> Reserve unseen data (<span className="font-mono text-slate-300">InpOosSplitRatio</span>); CSV outputs tag <span className="font-mono text-slate-300">IN_SAMPLE</span> vs <span className="font-mono text-slate-300">OUT_OF_SAMPLE</span> folds and score bands.
             </li>
             <li>
-              <span className="font-medium text-slate-200">4. Monte Carlo &amp; Robustness Sweeps:</span> Perturb score thresholds (+/- 5 pts) and SL/TP ATR multipliers (+/- 0.2x) to verify stability without curve-fitting.
+              <span className="font-medium text-slate-200">4. Diagnostic Logs:</span> Rejection codes (<span className="font-mono text-slate-300">TERMINAL_AUTO_DISABLED</span>, <span className="font-mono text-slate-300">SPREAD_TOO_WIDE</span>, <span className="font-mono text-slate-300">INSUFFICIENT_MARGIN</span>, <span className="font-mono text-slate-300">OPPOSING_SIGNAL_CONFLICT</span>, etc.) are written to the Experts journal and <span className="font-mono text-slate-300">rejected_signals.csv</span>.
             </li>
           </ul>
         </div>
 
         <div className="rounded-lg border border-slate-800 bg-slate-900/60 p-5 space-y-3">
           <h2 className="font-display text-sm font-semibold text-slate-100">
-            12 Structured CSV Research Datasets
+            {csvSchemas.length} Structured CSV Research Datasets (Parsed from CSVLogger.mqh)
           </h2>
           <p className="text-xs text-slate-400">
-            Buffered writes prevent tick-level disk thrashing and format cleanly for Python, R, Excel, or the Performance Terminal tab.
+            Buffered writes prevent tick-level disk thrashing and inspect cleanly in the CSV Terminal tab.
           </p>
-          <div className="grid grid-cols-2 gap-2 pt-1">
-            {csvExports.map((file) => (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+            {csvSchemas.map((schema) => (
               <div
-                key={file}
-                className="rounded border border-slate-800/80 bg-slate-950/60 px-2.5 py-1.5 font-mono text-[11px] text-slate-300"
+                key={schema.filename}
+                className="rounded border border-slate-800/80 bg-slate-950/60 px-2.5 py-1.5"
               >
-                {file}
+                <p className="font-mono text-[11px] text-sky-300">{schema.filename}</p>
+                <p className="mt-0.5 text-[10px] text-slate-500 tabular-nums">
+                  {schema.columns.length} columns
+                </p>
               </div>
             ))}
           </div>

@@ -79,15 +79,21 @@ public:
       m_warningCount = 0;
       ArrayResize(m_throttleKeys, 0);
       ArrayResize(m_lastLogTimeByKey, 0);
+      m_logFilePath = "";
 
-      string folder = StringFormat("%s\\Logs", EA_DATA_ROOT);
-      FolderCreate(EA_DATA_ROOT);
-      FolderCreate(folder);
+      if(!MQLInfoInteger(MQL_TESTER))
+      {
+         string folder = StringFormat("%s\\Logs", EA_DATA_ROOT);
+         FolderCreate(EA_DATA_ROOT);
+         FolderCreate(folder);
 
-      MqlDateTime dt;
-      TimeToStruct(TimeCurrent(), dt);
-      m_logFilePath = StringFormat("%s\\asea_%s_%I64d_%04d%02d%02d.log",
-                                   folder, symbol, magic, dt.year, dt.mon, dt.day);
+         datetime tsRef = TimeCurrent();
+         if(tsRef <= 0) tsRef = TimeLocal();
+         MqlDateTime dt;
+         TimeToStruct(tsRef, dt);
+         m_logFilePath = StringFormat("%s\\asea_%s_%I64d_%04d%02d%02d.log",
+                                      folder, symbol, magic, dt.year, dt.mon, dt.day);
+      }
       Log(LOG_INFO, "Diagnostics", "Diagnostic logger initialized.");
       return true;
    }

@@ -1,21 +1,23 @@
-# AdvancedScalpingEA — System Architecture
+# AdvancedScalpingEA v2.2.0 — System Architecture
 
 ## 1. Design Philosophy & Isolation Guarantees
-AdvancedScalpingEA is engineered as a modular MetaTrader 5 quantitative research and scalping Expert Advisor. Its primary invariants are:
-1. **Research & Demo Safety by Default**: `InpOperatingMode` defaults to `EA_MODE_RESEARCH_ONLY` and `InpAllowLiveTrading = false`. Real-money execution requires explicit opt-in via two independent boolean inputs alongside `EA_MODE_LIVE_TRADING`.
-2. **Strict Read-Only Dashboard Isolation**: `CDashboardManager` accepts only `const SDashboardSnapshot`, `const SManagedPosition[]`, and curve value arrays. It holds no pointers or references to `CEAController`, `CRiskManagement`, `CTradeExecution`, or any strategy instance.
-3. **Zero Look-Ahead / Zero Repainting**: Indicators (`IndicatorEngine.mqh`, `MultiTimeframe.mqh`), market structure (`MarketStructure.mqh`), candlestick formations (`CandlestickRecognition.mqh`), and geometric chart patterns (`PatternRecognition.mqh`) evaluate completed bars (`shift >= 1`) exclusively.
-4. **Magic-Number Ownership Isolation**: `CPositionManagement` and `CPerformanceAnalytics` strictly filter `PositionsTotal()` and `HistoryDealsTotal()` by `POSITION_MAGIC == m_magic` and `DEAL_MAGIC == m_magic`, never modifying manual trades or unrelated EAs.
+AdvancedScalpingEA v2.2.0 is engineered as a modular MetaTrader 5 quantitative multi-market scalping Expert Advisor. Its primary invariants are:
+1. **Ready-to-Trade Execution Across Live, Demo & Strategy Tester**: `InpOperatingMode` defaults to `EA_MODE_LIVE_TRADING`, `InpAllowLiveTrading = true`, and `InpConfirmLiveRiskAcknowledgement = true` (zero fake execution modes). `TradeValidation.mqh` enforces `TERMINAL_TRADE_ALLOWED` strictly in live/demo runtime while evaluating `MQL_TRADE_ALLOWED` in `MQL_TESTER` so backtests run reliably regardless of the terminal toolbar button state.
+2. **Universal Symbol Auto-Profiler (`SymbolIntelligence.mqh`)**: Automatically classifies Forex Majors/Minors/Exotics, Metals, Energies, Stock Indices, Crypto CFDs, and Synthetic Indices via ticker tokens, `SYMBOL_SECTOR`, and `SYMBOL_TRADE_CALC_MODE`, dynamically scaling pip size, slippage deviation, commission recovery, and ATR-normalized auto-spread limits when `InpMaxSpreadPoints = 0.0`.
+3. **Strict Read-Only Dashboard Isolation & Non-Visual Tester Acceleration**: `CDashboardManager` accepts only `const SDashboardSnapshot`, `const SManagedPosition[]`, and curve/breakdown arrays, and skips `OnTimer()` / snapshot copying completely in non-visual Strategy Tester runs (`MQL_TESTER && !MQL_VISUAL_MODE`).
+4. **Zero Look-Ahead / Zero Repainting**: Indicators (`IndicatorEngine.mqh`, `MultiTimeframe.mqh`), market structure (`MarketStructure.mqh`), candlestick formations (`CandlestickRecognition.mqh`), and geometric chart patterns (`PatternRecognition.mqh`) evaluate completed bars (`shift >= 1`) exclusively, using bar-timestamp caching to avoid redundant `CopyRates`/`CopyBuffer` work on intra-bar ticks.
+5. **Magic-Number Ownership Isolation**: `CPositionManagement` and `CPerformanceAnalytics` strictly filter `PositionsTotal()` and `HistoryDealsTotal()` by `POSITION_MAGIC == m_magic` and `DEAL_MAGIC == m_magic`.
 
-## 2. Module Dependency Layers
-- **Core**: `Types.mqh`, `Diagnostics.mqh`, `StateManager.mqh`, `EAController.mqh`
-- **Market**: `SymbolIntelligence.mqh`, `MarketData.mqh`, `TickAnalysis.mqh`, `MarketStructure.mqh`, `MarketRegime.mqh`, `MultiTimeframe.mqh`
-- **Indicators**: `IndicatorEngine.mqh`, `CandlestickRecognition.mqh`, `PatternRecognition.mqh`
-- **Strategies**: `StrategyBase.mqh`, `TrendPullback.mqh`, `MomentumScalping.mqh`, `BreakoutScalping.mqh`, `ReversalScalping.mqh`, `RangeScalping.mqh`, `VolatilityExpansion.mqh`, `MicroMomentum.mqh`
-- **Trading**: `SignalScoring.mqh`, `TradeValidation.mqh`, `RiskManagement.mqh`, `TradeExecution.mqh`, `PositionManagement.mqh`
-- **Intelligence**: `StrategySelection.mqh`, `AdaptiveLearning.mqh`, `HistoricalResearch.mqh`
-- **Analytics**: `Statistics.mqh`, `PerformanceAnalytics.mqh`, `CSVLogger.mqh`
+## 2. Module Dependency Layers (v2.2.0)
+- **Core**: `Types.mqh`, `Diagnostics.mqh`, `StateManager.mqh` (schema v2), `SymbolContext.mqh` (isolated per-symbol container supporting up to 8 symbols), `EAController.mqh` (per-symbol post-loss cooldowns, directional consensus, opposing-conflict chop guard, live-price anti-chase guard)
+- **Market**: `SymbolIntelligence.mqh` (universal asset classifier, hedging/netting detection, auto-adaptive spread/slippage limits, `OrderCalcProfit` fallback, historical commission inspection), `MarketData.mqh`, `TickAnalysis.mqh`, `MarketStructure.mqh`, `MarketRegime.mqh` (17 granular market regimes + transition detection), `MultiTimeframe.mqh`
+- **Indicators**: `IndicatorEngine.mqh` (ATR(5)/ATR(14)/ATR(40), session VWAP, volatility percentile, StdDev, momentum acceleration, RSI divergence, exhaustion), `CandlestickRecognition.mqh`, `PatternRecognition.mqh`
+- **Strategies**: `StrategyBase.mqh` (`ComputeStructuralSLDist()` swing/S/R stop anchoring, `GetRegimeSuitability()`, `ShouldExitPosition()`), plus all 7 independent strategies (`TrendPullback`, `MomentumScalping`, `BreakoutScalping`, `ReversalScalping`, `RangeScalping`, `VolatilityExpansion`, `MicroMomentum`)
+- **Trading**: `ExpectancyEngine.mqh` (spread + adaptive slippage + commission modeling), `SignalScoring.mqh` (10-component 0–100 score + session VWAP confluence + `ApplyMultiStrategyConsensus()`), `TradeValidation.mqh` (12-gate validator with auto-adaptive spread ceiling), `RiskManagement.mqh` (equity-DD & streak anti-Martingale throttling, margin-safe lot clamping, portfolio open risk & Forex currency exposure caps), `TradeExecution.mqh` (3-mode IOC/FOK/RETURN fallback, adaptive slippage), `PositionManagement.mqh` (cost-covering Break-Even, partial close min-lot guard, tiered progressive Chandelier trailing, momentum-confirmed CHoCH exit, optional Friday close)
+- **Intelligence**: `StrategySelection.mqh`, `AdaptiveLearning.mqh` (5-stage controlled pipeline), `HistoricalResearch.mqh` (OOS split tagging, score-band metrics, deterministic Monte Carlo drawdown)
+- **Analytics**: `Statistics.mqh`, `PerformanceAnalytics.mqh`, `CSVLogger.mqh` (12 buffered CSV files)
 - **Dashboard**: `DashboardComponents.mqh`, `DashboardLayout.mqh`, `DashboardCharts.mqh`, `DashboardStatistics.mqh`, `DashboardManager.mqh`
 
 ## 3. State Recovery on Terminal Restart
-`CStateManager` persists daily/weekly balance anchors, peak equity/balance, consecutive loss counters, lockout status, and observation counters into `MQL5/Files/AdvancedScalpingEA/State/state_<symbol>_<magic>.ini` using safe text key-value encoding. On startup, `CEAController` restores those anchors and reconciles open positions and historical closed deals directly from MT5 terminal state.
+`CStateManager` (`schemaVersion = 2`) persists daily/weekly balance anchors, peak equity/balance, consecutive loss counters, lockout status, active/validated config versions, and observation counters into `MQL5/Files/AdvancedScalpingEA/State/state_<symbol>_<magic>.ini`. On startup, `CEAController` restores those anchors and reconciles open positions (`partialExitTaken`, MFE/MAE, exit tracking) and historical closed deals directly from MT5 terminal state.
+
