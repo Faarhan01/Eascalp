@@ -37,6 +37,7 @@ struct SEAConfig
    bool   confirmLiveRiskAck;
    long   magicNumber;
    string configLabel;
+   bool   autoAdaptBySymbol;
 
    string symbolOverride;
    string multiSymbolList;
@@ -107,7 +108,8 @@ struct SEAConfig
       allowLiveTrading = true;
       confirmLiveRiskAck = true;
       magicNumber = 510299;
-      configLabel = "ReadyToTrade_v2.2";
+      configLabel = "AutoAdaptive_v2.3";
+      autoAdaptBySymbol = true;
       symbolOverride = "";
       multiSymbolList = "";
       spreadAvgWindow = 120;
@@ -123,8 +125,8 @@ struct SEAConfig
       swingStrength = 3;
       structureLookback = 120;
       zoneAtrMult = 0.35;
-      adxStrongThresh = 28.0;
-      adxWeakThresh = 18.0;
+      adxStrongThresh = 26.0;
+      adxWeakThresh = 17.0;
       volHighRatio = 1.45;
       volLowRatio = 0.70;
       spreadUnstableRatio = 2.80;
@@ -139,16 +141,16 @@ struct SEAConfig
       enableRangeScalp = true;
       enableVolExpansion = true;
       enableMicroMomentum = true;
-      defaultSlAtrMult = 1.5;
-      defaultTpAtrMult = 2.2;
-      evaluateOnNewBarOnly = false;
+      defaultSlAtrMult = 1.60;
+      defaultTpAtrMult = 2.80;
+      evaluateOnNewBarOnly = true;
       expCfg.ResetDefaults();
       valCfg.ResetDefaults();
       riskCfg.ResetDefaults();
       maxSlippagePoints = 25;
       maxOrderRetries = 2;
       posCfg.ResetDefaults();
-      lossCooldownBars = 2;
+      lossCooldownBars = 3;
       autoSelectBestStrategy = false;
       minStrategySampleSize = 20;
       enableAdaptiveEvaluation = true;
@@ -219,15 +221,16 @@ private:
    int                  m_lastRejDir[EA_MAX_SYMBOLS];
    string               m_lastRejCode[EA_MAX_SYMBOLS];
 
-   void TriggerLossCooldown(const string sym)
+   void TriggerLossCooldown(const string sym, const int cooldownOverride = -1)
    {
-      if(m_cfg.lossCooldownBars <= 0 || sym == "") return;
+      int bars = (cooldownOverride >= 0) ? cooldownOverride : m_cfg.lossCooldownBars;
+      if(bars <= 0 || sym == "") return;
       for(int i = 0; i < EA_MAX_SYMBOLS; i++)
       {
          if(m_cdSymbols[i] == sym || m_cdSymbols[i] == "")
          {
             m_cdSymbols[i] = sym;
-            m_cdBarsLeft[i] = m_cfg.lossCooldownBars;
+            m_cdBarsLeft[i] = bars;
             return;
          }
       }
@@ -339,7 +342,21 @@ private:
          {
             m_risk.RecordClosedTradePnL(events[i].netPnL);
             if(events[i].netPnL < 0.0)
-               TriggerLossCooldown(events[i].symbol);
+            {
+               int cdBars = m_cfg.lossCooldownBars;
+               if(m_cfg.autoAdaptBySymbol)
+               {
+                  for(int k = 0; k < m_symbolCount; k++)
+                  {
+                     if(m_contexts[k].GetSymbol() == events[i].symbol)
+                     {
+                        cdBars = MathMax(m_cfg.lossCooldownBars, m_contexts[k].GetContext().assetProfile.lossCooldownBars);
+                        break;
+                     }
+                  }
+               }
+               TriggerLossCooldown(events[i].symbol, cdBars);
+            }
             m_research.RecordTradeOutcome(events[i].netPnL, events[i].score);
             SResearchFoldInfo fold = m_research.GetFoldTag(events[i].closeTime);
             m_csv.LogTradeExecutionOrClose(events[i].symbol, m_cfg.primaryTF, events[i].positionTicket,
@@ -472,12 +489,20 @@ public:
             m_cfg.adxStrongThresh, m_cfg.adxWeakThresh, m_cfg.volHighRatio, m_cfg.volLowRatio,
             m_cfg.spreadUnstableRatio, m_cfg.dojiBodyMaxRatio, m_cfg.pinWickMinRatio,
             m_cfg.patternLookback, m_cfg.patternTolAtrMult,
-            m_cfg.mtfWeightHtf, m_cfg.mtfWeightItf, m_cfg.mtfWeightLtf, GetPointer(m_diag)
+            m_cfg.mtfWeightHtf, m_cfg.mtfWeightItf, m_cfg.mtfWeightLtf,
+            m_cfg.autoAdaptBySymbol, GetPointer(m_diag)
          );
          if(ok)
          {
             if(m_monitoredSummary != "") m_monitoredSummary += ", ";
             m_monitoredSummary += syms[i];
+            m_diag.Log(LOG_INFO, "SymbolProfile",
+                       StringFormat("%s -> Asset=%s | AutoProfile='%s' | StepIndex=%s | 24x7=%s | Spread=%.1f pts",
+                                    syms[i], AssetClassToString(m_contexts[m_symbolCount].GetContext().symbolProfile.assetClass),
+                                    m_contexts[m_symbolCount].GetContext().assetProfile.profileName,
+                                    m_contexts[m_symbolCount].GetContext().symbolProfile.isStepIndex ? "YES" : "NO",
+                                    m_contexts[m_symbolCount].GetContext().symbolProfile.isSynthetic24x7 ? "YES" : "NO",
+                                    m_contexts[m_symbolCount].GetContext().symbolProfile.spreadPoints));
             m_symbolCount++;
          }
          else
@@ -492,13 +517,18 @@ public:
          return false;
       }
 
-      m_stratPullback.Configure(m_cfg.enableTrendPullback, m_cfg.defaultSlAtrMult, m_cfg.defaultTpAtrMult, m_cfg.minStrategySampleSize, 18.0, 0.65);
-      m_stratMomentum.Configure(m_cfg.enableMomentumScalp, m_cfg.defaultSlAtrMult, m_cfg.defaultTpAtrMult, m_cfg.minStrategySampleSize, 0.010);
-      m_stratBreakout.Configure(m_cfg.enableBreakoutScalp, m_cfg.defaultSlAtrMult, m_cfg.defaultTpAtrMult * 1.1, m_cfg.minStrategySampleSize, 0.35);
+      m_stratPullback.Configure(m_cfg.enableTrendPullback, m_cfg.defaultSlAtrMult, m_cfg.defaultTpAtrMult, m_cfg.minStrategySampleSize, 18.0, 0.70);
+      m_stratMomentum.Configure(m_cfg.enableMomentumScalp, m_cfg.defaultSlAtrMult, m_cfg.defaultTpAtrMult, m_cfg.minStrategySampleSize, 0.015);
+      m_stratBreakout.Configure(m_cfg.enableBreakoutScalp, m_cfg.defaultSlAtrMult, m_cfg.defaultTpAtrMult * 1.05, m_cfg.minStrategySampleSize, 0.35);
       m_stratReversal.Configure(m_cfg.enableReversalScalp, m_cfg.defaultSlAtrMult, m_cfg.defaultTpAtrMult, m_cfg.minStrategySampleSize, 32.0, 68.0);
-      m_stratRange.Configure(m_cfg.enableRangeScalp, m_cfg.defaultSlAtrMult * 0.9, m_cfg.defaultTpAtrMult * 0.85, m_cfg.minStrategySampleSize, 24.0);
-      m_stratVolExp.Configure(m_cfg.enableVolExpansion, m_cfg.defaultSlAtrMult * 1.1, m_cfg.defaultTpAtrMult * 1.2, m_cfg.minStrategySampleSize, 1.15);
-      m_stratMicro.Configure(m_cfg.enableMicroMomentum, m_cfg.defaultSlAtrMult * 0.85, m_cfg.defaultTpAtrMult * 0.8, m_cfg.minStrategySampleSize, 3, 1.0, 22.0);
+      m_stratRange.Configure(m_cfg.enableRangeScalp, m_cfg.defaultSlAtrMult * 0.95, m_cfg.defaultTpAtrMult * 0.88, m_cfg.minStrategySampleSize, 22.0);
+      m_stratVolExp.Configure(m_cfg.enableVolExpansion, m_cfg.defaultSlAtrMult * 1.08, m_cfg.defaultTpAtrMult * 1.15, m_cfg.minStrategySampleSize, 1.15);
+      m_stratMicro.Configure(m_cfg.enableMicroMomentum, m_cfg.defaultSlAtrMult, m_cfg.defaultTpAtrMult * 0.95, m_cfg.minStrategySampleSize, 5, 1.0, 20.0);
+      for(int i = 0; i < EA_MAX_STRATEGIES; i++)
+      {
+         if(m_strategies[i] != NULL)
+            m_strategies[i].SetAutoAdaptBySymbol(m_cfg.autoAdaptBySymbol);
+      }
 
       m_expectancy.Configure(m_cfg.expCfg);
       m_scoring.Configure(m_cfg.valCfg.minSignalScore);
@@ -605,7 +635,7 @@ public:
          // Manage existing positions on this symbol (always active even under lockout)
          m_posMgmt.ManageSymbolPositions(sym, ctx, m_contexts[sIdxSym].GetLastSignal(),
                                          *(m_contexts[sIdxSym].GetSymbolIntelPtr()),
-                                         m_strategies, EA_MAX_STRATEGIES, m_execution);
+                                         m_strategies, EA_MAX_STRATEGIES, m_execution, m_cfg.autoAdaptBySymbol);
          if(PositionsTotal() != beforeMgmtTotal)
          {
             m_lastKnownPositionsTotal = PositionsTotal();
@@ -689,12 +719,16 @@ public:
                }
             }
 
+            double effMinScore = m_cfg.autoAdaptBySymbol
+                                 ? MathMax(m_cfg.valCfg.minSignalScore, ctx.assetProfile.minSignalScore)
+                                 : m_cfg.valCfg.minSignalScore;
+
             STradeSignal topSignal;
             topSignal.Reset();
             bool chopConflict = false;
             if(bestBuy.isValid && bestSell.isValid &&
-               bestBuyScore >= (m_cfg.valCfg.minSignalScore - 4.0) &&
-               bestSellScore >= (m_cfg.valCfg.minSignalScore - 4.0) &&
+               bestBuyScore >= (effMinScore - 4.0) &&
+               bestSellScore >= (effMinScore - 4.0) &&
                MathAbs(bestBuyScore - bestSellScore) <= 6.0)
             {
                chopConflict = true;
@@ -705,13 +739,13 @@ public:
                if(bestBuyScore >= bestSellScore)
                {
                   topSignal = bestBuy;
-                  bool oppWeak = (bestSell.isValid && bestSellScore >= (m_cfg.valCfg.minSignalScore - 4.0));
+                  bool oppWeak = (bestSell.isValid && bestSellScore >= (effMinScore - 4.0));
                   m_scoring.ApplyMultiStrategyConsensus(topSignal, buyCount, oppWeak);
                }
                else
                {
                   topSignal = bestSell;
-                  bool oppWeak = (bestBuy.isValid && bestBuyScore >= (m_cfg.valCfg.minSignalScore - 4.0));
+                  bool oppWeak = (bestBuy.isValid && bestBuyScore >= (effMinScore - 4.0));
                   m_scoring.ApplyMultiStrategyConsensus(topSignal, sellCount, oppWeak);
                }
             }
@@ -746,7 +780,7 @@ public:
                   bool canRetry = (prevCode == "SPREAD_TOO_WIDE" || prevCode == "SPREAD_SPIKE" ||
                                    prevCode == "SPREAD_TO_ATR_HIGH" || prevCode == "LIVE_PRICE_EXTENDED" ||
                                    prevCode == "LIVE_PRICE_PAST_SL" ||
-                                   (prevCode == "LOW_SIGNAL_SCORE" && topSignal.compositeScore >= m_cfg.valCfg.minSignalScore));
+                                   (prevCode == "LOW_SIGNAL_SCORE" && topSignal.compositeScore >= effMinScore));
                   if(!canRetry)
                      continue;
                }
@@ -814,12 +848,13 @@ public:
 
                   SStrategyStats stStats = (sId >= 0 && sId < EA_MAX_STRATEGIES) ? m_strategies[sId].GetStats() : m_strategies[0].GetStats();
                   double evalLots = (lots > 0.0) ? lots : ctx.symbolProfile.volumeMin;
-                  m_expectancy.Evaluate(topSignal, ctx.market, *(m_contexts[sIdxSym].GetSymbolIntelPtr()), stStats, evalLots);
+                  m_expectancy.Evaluate(topSignal, ctx.market, *(m_contexts[sIdxSym].GetSymbolIntelPtr()), stStats, evalLots, m_cfg.autoAdaptBySymbol);
 
                   bool execEnabled = (m_cfg.operatingMode == EA_MODE_DEMO_EXECUTION || m_cfg.operatingMode == EA_MODE_LIVE_TRADING);
                   SValidationResult valRes = m_validation.Validate(topSignal, ctx.symbolProfile, ctx.market, ctx.ind,
                                                                    ctx.regime, ctx.mtf, rk,
-                                                                   *(m_contexts[sIdxSym].GetSymbolIntelPtr()), lots, execEnabled);
+                                                                   *(m_contexts[sIdxSym].GetSymbolIntelPtr()), lots, execEnabled,
+                                                                   m_cfg.autoAdaptBySymbol);
 
                   m_contexts[sIdxSym].SetLastDecision(topSignal, valRes);
                   decisionUpdated = true;

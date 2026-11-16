@@ -83,31 +83,92 @@ private:
             clean = StringSubstr(clean, 1);
          }
       }
+
+      // Strip trailing unseparated broker account suffixes on 6-letter FX/Metal cores (e.g. EURUSDm, GBPUSDc, EURUSDraw, XAUUSDpro)
+      if(StringLen(clean) > 6 && StringFind(upper, "INDEX") < 0 && StringFind(upper, "CASH") < 0 &&
+         StringFind(upper, "STEP") < 0 && StringFind(upper, "BOOM") < 0 && StringFind(upper, "CRASH") < 0 &&
+         StringFind(upper, "JUMP") < 0 && StringFind(upper, "VOL") < 0 && StringFind(upper, "US30") < 0 &&
+         StringFind(upper, "US500") < 0 && StringFind(upper, "US100") < 0 && StringFind(upper, "NAS100") < 0)
+      {
+         string head6 = StringSubstr(clean, 0, 6);
+         string head6U = head6;
+         StringToUpper(head6U);
+         string tail = StringSubstr(clean, 6);
+         string tailL = tail;
+         StringToLower(tailL);
+         bool allAlpha6 = true;
+         for(int i = 0; i < 6; i++)
+         {
+            ushort ch = StringGetCharacter(head6U, i);
+            if(ch < 'A' || ch > 'Z') { allAlpha6 = false; break; }
+         }
+         if(allAlpha6 && (tailL == "m" || tailL == "c" || tailL == "i" || tailL == "r" || tailL == "z" ||
+                          tailL == "x" || tailL == "a" || tailL == "b" || tailL == "e" || tailL == "k" ||
+                          tailL == "pro" || tailL == "ecn" || tailL == "raw" || tailL == "std" ||
+                          tailL == "micro" || tailL == "mini" || tailL == "cent" || tailL == "zero" ||
+                          tailL == "vip" || tailL == "prime" || tailL == "plus" || tailL == "fx"))
+         {
+            outSuffix = tail + outSuffix;
+            clean = head6;
+         }
+      }
       return clean;
    }
 
-   ENUM_ASSET_CLASS ClassifySymbol(const string sym, const string core, const string baseCcy, const string profitCcy) const
+   bool IsKnownMajorPair(const string b, const string q) const
    {
+      return ((b == "EUR" && q == "USD") || (b == "GBP" && q == "USD") ||
+              (b == "USD" && q == "JPY") || (b == "USD" && q == "CHF") ||
+              (b == "USD" && q == "CAD") || (b == "AUD" && q == "USD") ||
+              (b == "NZD" && q == "USD"));
+   }
+
+   bool IsMajorCurrency(const string c) const
+   {
+      return (c == "USD" || c == "EUR" || c == "GBP" || c == "JPY" ||
+              c == "CHF" || c == "CAD" || c == "AUD" || c == "NZD");
+   }
+
+   ENUM_ASSET_CLASS ClassifySymbol(const string sym, const string core, const string baseCcy, const string profitCcy,
+                                   bool &outStepIndex, bool &outSyntheticBurst) const
+   {
+      outStepIndex = false;
+      outSyntheticBurst = false;
+
       string u = core;
       StringToUpper(u);
       string fullU = sym;
       StringToUpper(fullU);
+      string pathU = SymbolInfoString(sym, SYMBOL_PATH);
+      StringToUpper(pathU);
       string baseU = baseCcy;
       StringToUpper(baseU);
       string profU = profitCcy;
       StringToUpper(profU);
 
-      if(StringFind(fullU, "VOLATILITY") >= 0 || StringFind(fullU, "STEP") >= 0 ||
-         StringFind(fullU, "CRASH") >= 0 || StringFind(fullU, "BOOM") >= 0 ||
-         StringFind(fullU, "JUMP") >= 0 || StringFind(fullU, "RANGE BREAK") >= 0 ||
-         StringFind(fullU, "DRIFT") >= 0 || StringFind(fullU, "1HZ") >= 0 ||
+      if(StringFind(fullU, "STEP") >= 0 || StringFind(pathU, "STEP") >= 0)
+      {
+         outStepIndex = true;
+         return ASSET_SYNTHETIC;
+      }
+
+      if(StringFind(fullU, "VOLATILITY") >= 0 || StringFind(fullU, "CRASH") >= 0 ||
+         StringFind(fullU, "BOOM") >= 0 || StringFind(fullU, "JUMP") >= 0 ||
+         StringFind(fullU, "RANGE BREAK") >= 0 || StringFind(fullU, "DRIFT") >= 0 ||
+         StringFind(fullU, "1HZ") >= 0 || StringFind(fullU, "DEX") >= 0 ||
          StringFind(fullU, "R_10") >= 0 || StringFind(fullU, "R_25") >= 0 ||
          StringFind(fullU, "R_50") >= 0 || StringFind(fullU, "R_75") >= 0 ||
          StringFind(fullU, "R_100") >= 0 || StringFind(fullU, "V10") >= 0 ||
          StringFind(fullU, "V25") >= 0 || StringFind(fullU, "V50") >= 0 ||
          StringFind(fullU, "V75") >= 0 || StringFind(fullU, "V100") >= 0 ||
-         StringFind(fullU, "DEX") >= 0)
+         StringFind(pathU, "SYNTH") >= 0 || StringFind(pathU, "CRASH") >= 0 ||
+         StringFind(pathU, "BOOM") >= 0 || StringFind(pathU, "VOLATILITY") >= 0)
+      {
+         outSyntheticBurst = (StringFind(fullU, "CRASH") >= 0 || StringFind(fullU, "BOOM") >= 0 ||
+                              StringFind(fullU, "JUMP") >= 0 || StringFind(fullU, "VOLATILITY") >= 0 ||
+                              StringFind(fullU, "1HZ") >= 0 || StringFind(fullU, "R_") >= 0);
          return ASSET_SYNTHETIC;
+      }
 
       if(StringFind(u, "XAU") >= 0 || StringFind(u, "GOLD") >= 0 ||
          StringFind(u, "XAG") >= 0 || StringFind(u, "SILVER") >= 0 ||
@@ -151,28 +212,14 @@ private:
          StringFind(u, "RUT") >= 0 || StringFind(u, "VIX") >= 0 || StringFind(u, "DXY") >= 0)
          return ASSET_INDEX;
 
-      string majors[8] = {"USD", "EUR", "GBP", "JPY", "CHF", "CAD", "AUD", "NZD"};
-      bool baseMajor = false;
-      bool quoteMajor = false;
-
       if(StringLen(u) >= 6)
       {
          string b = StringSubstr(u, 0, 3);
          string q = StringSubstr(u, 3, 3);
-         for(int i = 0; i < 8; i++)
-         {
-            if(b == majors[i]) baseMajor = true;
-            if(q == majors[i]) quoteMajor = true;
-         }
+         bool baseMajor = IsMajorCurrency(b);
+         bool quoteMajor = IsMajorCurrency(q);
          if(baseMajor && quoteMajor && StringLen(u) == 6)
-         {
-            if((b == "EUR" && q == "USD") || (b == "GBP" && q == "USD") ||
-               (b == "USD" && q == "JPY") || (b == "USD" && q == "CHF") ||
-               (b == "USD" && q == "CAD") || (b == "AUD" && q == "USD") ||
-               (b == "NZD" && q == "USD"))
-               return ASSET_FOREX_MAJOR;
-            return ASSET_FOREX_MINOR;
-         }
+            return IsKnownMajorPair(b, q) ? ASSET_FOREX_MAJOR : ASSET_FOREX_MINOR;
          if((baseMajor || quoteMajor) && StringLen(u) == 6)
             return ASSET_FOREX_EXOTIC;
       }
@@ -183,8 +230,6 @@ private:
       if(sector == SECTOR_INDEXES)         return ASSET_INDEX;
       if(sector == SECTOR_COMMODITIES)
       {
-         string pathU = SymbolInfoString(sym, SYMBOL_PATH);
-         StringToUpper(pathU);
          if(StringFind(pathU, "METAL") >= 0)  return ASSET_METAL;
          if(StringFind(pathU, "ENERGY") >= 0 || StringFind(pathU, "OIL") >= 0 || StringFind(pathU, "GAS") >= 0) return ASSET_ENERGY;
       }
@@ -193,7 +238,15 @@ private:
       if(calcMode == SYMBOL_CALC_MODE_CFDINDEX)
          return ASSET_INDEX;
       if(calcMode == SYMBOL_CALC_MODE_FOREX || calcMode == SYMBOL_CALC_MODE_FOREX_NO_LEVERAGE || sector == SECTOR_CURRENCY)
+      {
+         if(StringLen(baseU) == 3 && StringLen(profU) == 3)
+         {
+            if(IsKnownMajorPair(baseU, profU)) return ASSET_FOREX_MAJOR;
+            if(IsMajorCurrency(baseU) && IsMajorCurrency(profU)) return ASSET_FOREX_MINOR;
+            return ASSET_FOREX_EXOTIC;
+         }
          return (baseU == "USD" || profU == "USD") ? ASSET_FOREX_MINOR : ASSET_FOREX_EXOTIC;
+      }
 
       return ASSET_CFD;
    }
@@ -377,7 +430,10 @@ public:
       m_profile.currencyBase   = SymbolInfoString(sym, SYMBOL_CURRENCY_BASE);
       m_profile.currencyProfit = SymbolInfoString(sym, SYMBOL_CURRENCY_PROFIT);
       m_profile.currencyMargin = SymbolInfoString(sym, SYMBOL_CURRENCY_MARGIN);
-      m_profile.assetClass     = ClassifySymbol(sym, m_profile.baseSymbol, m_profile.currencyBase, m_profile.currencyProfit);
+      bool isStep = false, isBurst = false;
+      m_profile.assetClass     = ClassifySymbol(sym, m_profile.baseSymbol, m_profile.currencyBase, m_profile.currencyProfit, isStep, isBurst);
+      m_profile.isStepIndex    = isStep;
+      m_profile.isSyntheticBurst = isBurst;
 
       m_profile.digits          = (int)SymbolInfoInteger(sym, SYMBOL_DIGITS);
       m_profile.point           = SymbolInfoDouble(sym, SYMBOL_POINT);
@@ -481,6 +537,215 @@ public:
    }
 
    SSymbolProfile GetProfile() const { return m_profile; }
+
+   SAdaptiveAssetProfile GetAdaptiveAssetProfile() const
+   {
+      SAdaptiveAssetProfile ap;
+      ap.ResetDefaults();
+      ap.recommendedSlippagePts = MathMax(20, m_profile.recommendedSlippagePts);
+
+      if(m_profile.isStepIndex)
+      {
+         ap.profileName         = "Step Index (Quantized Synthetic)";
+         ap.slAtrMult           = 1.80;
+         ap.tpAtrMult           = 3.00;
+         ap.beTriggerAtr        = 1.50;
+         ap.partialTriggerAtr   = 2.00;
+         ap.partialFraction     = 0.40;
+         ap.trailStartAtr       = 2.00;
+         ap.trailStepAtr        = 1.05;
+         ap.adxStrongThresh     = 25.0;
+         ap.adxWeakThresh       = 16.0;
+         ap.volHighRatio        = 1.55;
+         ap.volLowRatio         = 0.65;
+         ap.spreadUnstableRatio = 3.00;
+         ap.maxSpreadRatio      = 2.80;
+         ap.maxSpreadAtrPct     = 30.0;
+         ap.maxVolatilityRatio  = 4.00;
+         ap.minVolatilityRatio  = 0.25;
+         ap.minTpToCostRatio    = 2.20;
+         ap.minSignalScore      = 58.0;
+         ap.lossCooldownBars    = 2;
+         ap.recommendedSlippagePts = MathMax(30, m_profile.recommendedSlippagePts);
+         ap.allow24x7Continuous = true;
+         ap.tuningNotes         = "24/7 continuous quantized-step profile with wider swing stop room and trend trail";
+         return ap;
+      }
+
+      switch(m_profile.assetClass)
+      {
+         case ASSET_FOREX_MAJOR:
+            ap.profileName         = "Forex Major";
+            ap.slAtrMult           = 1.55;
+            ap.tpAtrMult           = 2.75;
+            ap.beTriggerAtr        = 1.40;
+            ap.partialTriggerAtr   = 1.85;
+            ap.partialFraction     = 0.40;
+            ap.trailStartAtr       = 1.95;
+            ap.trailStepAtr        = 0.95;
+            ap.adxStrongThresh     = 26.0;
+            ap.adxWeakThresh       = 17.0;
+            ap.maxSpreadAtrPct     = 24.0;
+            ap.minSignalScore      = 60.0;
+            ap.lossCooldownBars    = 3;
+            ap.recommendedSlippagePts = MathMax(20, m_profile.recommendedSlippagePts);
+            ap.allow24x7Continuous = false;
+            ap.tuningNotes         = "Tight spread-cost FX major scaling";
+            break;
+
+         case ASSET_FOREX_MINOR:
+            ap.profileName         = "Forex Minor / Cross";
+            ap.slAtrMult           = 1.70;
+            ap.tpAtrMult           = 2.95;
+            ap.beTriggerAtr        = 1.50;
+            ap.partialTriggerAtr   = 1.95;
+            ap.partialFraction     = 0.40;
+            ap.trailStartAtr       = 2.05;
+            ap.trailStepAtr        = 1.00;
+            ap.adxStrongThresh     = 26.0;
+            ap.adxWeakThresh       = 17.0;
+            ap.spreadUnstableRatio = 3.00;
+            ap.maxSpreadRatio      = 2.75;
+            ap.maxSpreadAtrPct     = 28.0;
+            ap.minSignalScore      = 60.0;
+            ap.lossCooldownBars    = 3;
+            ap.recommendedSlippagePts = MathMax(30, m_profile.recommendedSlippagePts);
+            ap.allow24x7Continuous = false;
+            ap.tuningNotes         = "Wider wick clearance for JPY/EUR/GBP cross volatility";
+            break;
+
+         case ASSET_FOREX_EXOTIC:
+            ap.profileName         = "Forex Exotic";
+            ap.slAtrMult           = 1.90;
+            ap.tpAtrMult           = 3.25;
+            ap.beTriggerAtr        = 1.60;
+            ap.partialTriggerAtr   = 2.10;
+            ap.partialFraction     = 0.45;
+            ap.trailStartAtr       = 2.20;
+            ap.trailStepAtr        = 1.10;
+            ap.adxStrongThresh     = 28.0;
+            ap.adxWeakThresh       = 18.0;
+            ap.spreadUnstableRatio = 3.20;
+            ap.maxSpreadRatio      = 2.85;
+            ap.maxSpreadAtrPct     = 34.0;
+            ap.maxVolatilityRatio  = 3.80;
+            ap.minTpToCostRatio    = 2.40;
+            ap.minSignalScore      = 63.0;
+            ap.lossCooldownBars    = 3;
+            ap.recommendedSlippagePts = MathMax(45, m_profile.recommendedSlippagePts);
+            ap.allow24x7Continuous = false;
+            ap.tuningNotes         = "Strict cost-recovery threshold and wide stop clearance for exotics";
+            break;
+
+         case ASSET_METAL:
+            ap.profileName         = "Metals (XAU/XAG)";
+            ap.slAtrMult           = 1.75;
+            ap.tpAtrMult           = 3.10;
+            ap.beTriggerAtr        = 1.50;
+            ap.partialTriggerAtr   = 2.00;
+            ap.partialFraction     = 0.40;
+            ap.trailStartAtr       = 2.10;
+            ap.trailStepAtr        = 1.05;
+            ap.adxStrongThresh     = 27.0;
+            ap.adxWeakThresh       = 17.5;
+            ap.maxSpreadAtrPct     = 26.0;
+            ap.maxVolatilityRatio  = 3.60;
+            ap.minSignalScore      = 61.0;
+            ap.lossCooldownBars    = 3;
+            ap.recommendedSlippagePts = MathMax(35, m_profile.recommendedSlippagePts);
+            ap.allow24x7Continuous = false;
+            ap.tuningNotes         = "Sweep-resistant SL + extended Chandelier runner for Gold/Silver";
+            break;
+
+         case ASSET_INDEX:
+         case ASSET_ENERGY:
+            ap.profileName         = (m_profile.assetClass == ASSET_INDEX) ? "Stock Index CFD" : "Energy CFD";
+            ap.slAtrMult           = 1.75;
+            ap.tpAtrMult           = 3.05;
+            ap.beTriggerAtr        = 1.50;
+            ap.partialTriggerAtr   = 2.00;
+            ap.partialFraction     = 0.40;
+            ap.trailStartAtr       = 2.05;
+            ap.trailStepAtr        = 1.05;
+            ap.adxStrongThresh     = 26.0;
+            ap.adxWeakThresh       = 17.0;
+            ap.maxSpreadAtrPct     = 28.0;
+            ap.maxVolatilityRatio  = 3.60;
+            ap.minSignalScore      = 60.0;
+            ap.lossCooldownBars    = 3;
+            ap.recommendedSlippagePts = MathMax(40, m_profile.recommendedSlippagePts);
+            ap.allow24x7Continuous = false;
+            ap.tuningNotes         = "Momentum-friendly index/energy continuation target sizing";
+            break;
+
+         case ASSET_SYNTHETIC:
+            ap.profileName         = "Synthetic Volatility / Crash-Boom";
+            ap.slAtrMult           = 1.90;
+            ap.tpAtrMult           = 3.25;
+            ap.beTriggerAtr        = 1.55;
+            ap.partialTriggerAtr   = 2.05;
+            ap.partialFraction     = 0.40;
+            ap.trailStartAtr       = 2.15;
+            ap.trailStepAtr        = 1.10;
+            ap.adxStrongThresh     = 25.0;
+            ap.adxWeakThresh       = 16.5;
+            ap.volHighRatio        = 1.55;
+            ap.volLowRatio         = 0.65;
+            ap.spreadUnstableRatio = 3.10;
+            ap.maxSpreadRatio      = 2.90;
+            ap.maxSpreadAtrPct     = 30.0;
+            ap.maxVolatilityRatio  = 4.20;
+            ap.minVolatilityRatio  = 0.25;
+            ap.minTpToCostRatio    = 2.20;
+            ap.minSignalScore      = 59.0;
+            ap.lossCooldownBars    = 2;
+            ap.recommendedSlippagePts = MathMax(40, m_profile.recommendedSlippagePts);
+            ap.allow24x7Continuous = true;
+            ap.tuningNotes         = "24/7 synthetic expansion & spike-tolerant ATR regime scaling";
+            break;
+
+         case ASSET_CRYPTO:
+            ap.profileName         = "Crypto CFD (24/7)";
+            ap.slAtrMult           = 1.95;
+            ap.tpAtrMult           = 3.40;
+            ap.beTriggerAtr        = 1.60;
+            ap.partialTriggerAtr   = 2.10;
+            ap.partialFraction     = 0.40;
+            ap.trailStartAtr       = 2.20;
+            ap.trailStepAtr        = 1.15;
+            ap.adxStrongThresh     = 26.0;
+            ap.adxWeakThresh       = 17.0;
+            ap.volHighRatio        = 1.55;
+            ap.spreadUnstableRatio = 3.20;
+            ap.maxSpreadRatio      = 3.00;
+            ap.maxSpreadAtrPct     = 34.0;
+            ap.maxVolatilityRatio  = 4.20;
+            ap.minTpToCostRatio    = 2.40;
+            ap.minSignalScore      = 61.0;
+            ap.lossCooldownBars    = 3;
+            ap.recommendedSlippagePts = MathMax(60, m_profile.recommendedSlippagePts);
+            ap.allow24x7Continuous = true;
+            ap.tuningNotes         = "24/7 crypto volatility & spread-cushion scaling";
+            break;
+
+         default:
+            ap.profileName         = "Broker CFD (Generic Auto)";
+            ap.slAtrMult           = 1.75;
+            ap.tpAtrMult           = 3.00;
+            ap.beTriggerAtr        = 1.50;
+            ap.partialTriggerAtr   = 1.95;
+            ap.partialFraction     = 0.40;
+            ap.trailStartAtr       = 2.05;
+            ap.trailStepAtr        = 1.05;
+            ap.maxSpreadAtrPct     = 30.0;
+            ap.minSignalScore      = 60.0;
+            ap.recommendedSlippagePts = MathMax(35, m_profile.recommendedSlippagePts);
+            ap.allow24x7Continuous = m_profile.isSynthetic24x7;
+            ap.tuningNotes         = "Dynamic tick/contract-normalized CFD baseline";
+            break;
+      }
+      return ap;
+   }
 
    double NormalizePrice(const double price) const
    {

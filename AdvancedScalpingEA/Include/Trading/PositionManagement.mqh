@@ -37,22 +37,22 @@ struct SPosMgmtConfig
    void ResetDefaults()
    {
       enableBreakEven = true;
-      breakEvenTriggerAtr = 1.0;
+      breakEvenTriggerAtr = 1.45;
       breakEvenLockAtr = 0.15;
       enablePartialClose = true;
-      partialCloseTriggerAtr = 1.25;
-      partialCloseFraction = 0.50;
+      partialCloseTriggerAtr = 1.90;
+      partialCloseFraction = 0.40;
       enableTrailingStop = true;
       useProgressiveTrail = true;
       useChandelierTrail = true;
-      trailingStartAtr = 1.4;
-      trailingStepAtr = 0.9;
+      trailingStartAtr = 2.00;
+      trailingStepAtr = 1.00;
       enableStructureExit = true;
-      enableMomentumExit = true;
+      enableMomentumExit = false;
       enableStrategyExit = true;
       enableOppositeSignalExit = false;
       enableMaxHoldExit = true;
-      maxHoldingMinutes = 120;
+      maxHoldingMinutes = 180;
       closeBeforeWeekend = false;
       fridayCloseHour = 21;
    }
@@ -326,11 +326,18 @@ public:
 
    void ManageSymbolPositions(const string sym, const SAnalysisContext &ctx, const STradeSignal &latestSignal,
                               const CSymbolIntelligence &symIntel, CStrategyBase *&strategies[],
-                              const int stratCount, CTradeExecution &exec)
+                              const int stratCount, CTradeExecution &exec, const bool autoAdaptBySymbol = true)
    {
       if(m_posCount <= 0 || !ctx.market.dataReady) return;
 
       SSymbolProfile prof = symIntel.GetProfile();
+      SAdaptiveAssetProfile ap = symIntel.GetAdaptiveAssetProfile();
+      double effBeTrigMult   = autoAdaptBySymbol ? MathMax(m_cfg.breakEvenTriggerAtr, ap.beTriggerAtr)     : m_cfg.breakEvenTriggerAtr;
+      double effPartTrigMult = autoAdaptBySymbol ? MathMax(m_cfg.partialCloseTriggerAtr, ap.partialTriggerAtr) : m_cfg.partialCloseTriggerAtr;
+      double effPartFrac     = autoAdaptBySymbol ? ap.partialFraction : m_cfg.partialCloseFraction;
+      double effTrailStart   = autoAdaptBySymbol ? MathMax(m_cfg.trailingStartAtr, ap.trailStartAtr)       : m_cfg.trailingStartAtr;
+      double effTrailStep    = autoAdaptBySymbol ? MathMax(m_cfg.trailingStepAtr, ap.trailStepAtr)         : m_cfg.trailingStepAtr;
+
       double effAtr = (ctx.ind.isReady && ctx.ind.atr > 0.0)
                       ? ctx.ind.atr
                       : (ctx.market.spreadPoints * prof.point * 6.0);
@@ -344,7 +351,7 @@ public:
 
       int tfMinutes = MathMax(1, PeriodSeconds(ctx.market.timeframe) / 60);
       long effMaxHoldMin = (tfMinutes > 5)
-                           ? MathMax((long)m_cfg.maxHoldingMinutes, (long)tfMinutes * 16)
+                           ? MathMax((long)m_cfg.maxHoldingMinutes, (long)tfMinutes * 18)
                            : (long)m_cfg.maxHoldingMinutes;
 
       MqlDateTime dt;
@@ -406,19 +413,21 @@ public:
             continue;
          }
 
-         // 4. Momentum deterioration exit
-         if(m_cfg.enableMomentumExit && holdMin >= 15 && ctx.ind.isReady && p.floatingPnL < 0.0)
+         // 4. Stalled momentum breakdown exit (optional, only after sustained hold + multi-factor cross)
+         if(m_cfg.enableMomentumExit && holdMin >= 45 && ctx.ind.isReady && p.floatingPnL < 0.0)
          {
-            if(p.direction == SIGNAL_BUY && ctx.ind.macdHist < 0.0 && ctx.ind.rsi < 40.0 && ctx.market.close < ctx.ind.emaSlow)
+            if(p.direction == SIGNAL_BUY && ctx.ind.macdHist < 0.0 && ctx.ind.rsi < 38.0 &&
+               ctx.market.close < ctx.ind.emaSlow && ctx.ind.emaFast < ctx.ind.emaMedium)
             {
-               SetExitReason(p.ticket, "Momentum deterioration exit");
-               exec.ClosePosition(p.ticket, p.symbol, "Bullish momentum deterioration exit", symIntel);
+               SetExitReason(p.ticket, "Sustained momentum breakdown exit");
+               exec.ClosePosition(p.ticket, p.symbol, "Bullish momentum breakdown exit", symIntel);
                continue;
             }
-            if(p.direction == SIGNAL_SELL && ctx.ind.macdHist > 0.0 && ctx.ind.rsi > 60.0 && ctx.market.close > ctx.ind.emaSlow)
+            if(p.direction == SIGNAL_SELL && ctx.ind.macdHist > 0.0 && ctx.ind.rsi > 62.0 &&
+               ctx.market.close > ctx.ind.emaSlow && ctx.ind.emaFast > ctx.ind.emaMedium)
             {
-               SetExitReason(p.ticket, "Momentum deterioration exit");
-               exec.ClosePosition(p.ticket, p.symbol, "Bearish momentum deterioration exit", symIntel);
+               SetExitReason(p.ticket, "Sustained momentum breakdown exit");
+               exec.ClosePosition(p.ticket, p.symbol, "Bearish momentum breakdown exit", symIntel);
                continue;
             }
          }
@@ -426,46 +435,48 @@ public:
          double profitDist = (p.direction == SIGNAL_BUY) ? (ctx.market.bid - p.openPrice) : (p.openPrice - ctx.market.ask);
          double newSL = p.currentSL;
 
-         // 5. Momentum-confirmed CHoCH exit (unconfirmed CHoCH while profitable tightens SL instead of premature close)
-         if(m_cfg.enableStructureExit && ctx.structure.isReady && holdMin >= 5 && ctx.ind.isReady)
+         // 5. Multi-factor CHoCH exit (only close when structure, EMA21, MACD & HTF/profit confirm; otherwise tighten SL)
+         if(m_cfg.enableStructureExit && ctx.structure.isReady && holdMin >= 15 && ctx.ind.isReady)
          {
             if(p.direction == SIGNAL_BUY && ctx.structure.lastEvent == STRUCT_CHOCH_BEAR)
             {
-               if(ctx.ind.macdHist < 0.0 && ctx.market.close < ctx.ind.emaFast)
+               if(ctx.ind.macdHist < 0.0 && ctx.market.close < ctx.ind.emaMedium &&
+                  (profitDist > effAtr * 0.35 || ctx.mtf.higherBias == SIGNAL_SELL))
                {
                   SetExitReason(p.ticket, "Bearish CHoCH structure exit");
                   exec.ClosePosition(p.ticket, p.symbol, "Bearish CHoCH structure exit", symIntel);
                   continue;
                }
-               else if(profitDist > effAtr * 0.30)
+               else if(profitDist > effAtr * 0.45)
                {
-                  double tightSL = ctx.market.bid - effAtr * 0.55;
+                  double tightSL = ctx.market.bid - effAtr * 0.70;
                   if(tightSL <= ctx.market.bid - minStopDist && (newSL <= 0.0 || tightSL > newSL))
                      newSL = tightSL;
                }
             }
             if(p.direction == SIGNAL_SELL && ctx.structure.lastEvent == STRUCT_CHOCH_BULL)
             {
-               if(ctx.ind.macdHist > 0.0 && ctx.market.close > ctx.ind.emaFast)
+               if(ctx.ind.macdHist > 0.0 && ctx.market.close > ctx.ind.emaMedium &&
+                  (profitDist > effAtr * 0.35 || ctx.mtf.higherBias == SIGNAL_BUY))
                {
                   SetExitReason(p.ticket, "Bullish CHoCH structure exit");
                   exec.ClosePosition(p.ticket, p.symbol, "Bullish CHoCH structure exit", symIntel);
                   continue;
                }
-               else if(profitDist > effAtr * 0.30)
+               else if(profitDist > effAtr * 0.45)
                {
-                  double tightSL = ctx.market.ask + effAtr * 0.55;
+                  double tightSL = ctx.market.ask + effAtr * 0.70;
                   if(tightSL >= ctx.market.ask + minStopDist && (newSL <= 0.0 || tightSL < newSL))
                      newSL = tightSL;
                }
             }
          }
 
-         // 6. Partial profit scaling (guarded against un-splittable min-lots and immediate post-scale BE)
+         // 6. Partial profit scaling (guarded against un-splittable min-lots and premature BE)
          bool triggerImmediateBE = false;
-         if(m_cfg.enablePartialClose && !p.partialExitTaken && profitDist >= effAtr * m_cfg.partialCloseTriggerAtr)
+         if(m_cfg.enablePartialClose && !p.partialExitTaken && profitDist >= effAtr * effPartTrigMult)
          {
-            double partVol = symIntel.NormalizeVolume(p.volume * MathMax(0.20, MathMin(0.75, m_cfg.partialCloseFraction)));
+            double partVol = symIntel.NormalizeVolume(p.volume * MathMax(0.20, MathMin(0.75, effPartFrac)));
             if(p.volume >= prof.volumeMin * 2.0 && partVol >= prof.volumeMin && (p.volume - partVol) >= prof.volumeMin)
             {
                if(exec.ClosePartial(p.ticket, partVol, p.symbol, "ATR partial take-profit", symIntel))
@@ -484,7 +495,7 @@ public:
             }
          }
 
-         // 7. Cost-covering Break-Even & Progressive Tiered Chandelier Trailing (strictly monotonic)
+         // 7. Cost-covering Break-Even (>= 1.0R) & Progressive Tiered Chandelier Trailing
          double bestFav = (tIdx >= 0 && m_tracks[tIdx].bestFavorablePrice > 0.0)
                           ? m_tracks[tIdx].bestFavorablePrice
                           : ((p.direction == SIGNAL_BUY) ? ctx.market.bid : ctx.market.ask);
@@ -494,14 +505,14 @@ public:
          if(m_cfg.useProgressiveTrail && effAtr > 0.0)
          {
             double profitAtr = profitDist / effAtr;
-            if(profitAtr >= 3.0)      progMult = 0.55;
-            else if(profitAtr >= 2.0) progMult = 0.75;
+            if(profitAtr >= 3.5)      progMult = 0.60;
+            else if(profitAtr >= 2.5) progMult = 0.78;
          }
 
          double initSlDist = (p.initialSL > 0.0) ? MathAbs(p.openPrice - p.initialSL) : 0.0;
          double effBeTrigger = (initSlDist > 0.0)
-                               ? MathMin(effAtr * m_cfg.breakEvenTriggerAtr, MathMax(effAtr * 0.70, initSlDist * 1.02))
-                               : (effAtr * m_cfg.breakEvenTriggerAtr);
+                               ? MathMax(effAtr * effBeTrigMult, initSlDist * 1.00)
+                               : (effAtr * effBeTrigMult);
 
          if(p.direction == SIGNAL_BUY)
          {
@@ -512,10 +523,10 @@ public:
                if(beSL <= ctx.market.bid - minStopDist && (newSL <= 0.0 || beSL > newSL))
                   newSL = beSL;
             }
-            if(m_cfg.enableTrailingStop && profitDist >= effAtr * m_cfg.trailingStartAtr)
+            if(m_cfg.enableTrailingStop && profitDist >= effAtr * effTrailStart)
             {
                double anchor = m_cfg.useChandelierTrail ? MathMax(bestFav, ctx.market.bid) : ctx.market.bid;
-               double trailSL = anchor - effAtr * m_cfg.trailingStepAtr * volTrailMult * progMult;
+               double trailSL = anchor - effAtr * effTrailStep * volTrailMult * progMult;
                if(trailSL <= ctx.market.bid - minStopDist && (newSL <= 0.0 || trailSL > newSL))
                   newSL = trailSL;
             }
@@ -531,10 +542,10 @@ public:
                if(beSL >= ctx.market.ask + minStopDist && (newSL <= 0.0 || beSL < newSL))
                   newSL = beSL;
             }
-            if(m_cfg.enableTrailingStop && profitDist >= effAtr * m_cfg.trailingStartAtr)
+            if(m_cfg.enableTrailingStop && profitDist >= effAtr * effTrailStart)
             {
                double anchor = m_cfg.useChandelierTrail ? MathMin(bestFav, ctx.market.ask) : ctx.market.ask;
-               double trailSL = anchor + effAtr * m_cfg.trailingStepAtr * volTrailMult * progMult;
+               double trailSL = anchor + effAtr * effTrailStep * volTrailMult * progMult;
                if(trailSL >= ctx.market.ask + minStopDist && (newSL <= 0.0 || trailSL < newSL))
                   newSL = trailSL;
             }

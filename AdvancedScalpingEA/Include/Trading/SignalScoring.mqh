@@ -31,7 +31,7 @@ private:
 public:
    CSignalScoring()
    {
-      m_minScoreThreshold = 48.0;
+      m_minScoreThreshold = 60.0;
    }
 
    void Configure(const double minScoreThreshold)
@@ -193,10 +193,11 @@ public:
 
       // 7. Multi-timeframe weighted agreement (0..12)
       double mtfBase = (ctx.mtf.agreementScore / 100.0) * 12.0;
+      bool opposesHtf = ((dirSign > 0 && ctx.mtf.higherBias == SIGNAL_SELL) || (dirSign < 0 && ctx.mtf.higherBias == SIGNAL_BUY));
       if(ctx.mtf.higherBias == SIGNAL_NONE && mtfBase < 5.0)
          mtfBase = 5.0;
-      else if(ctx.mtf.assessment == MTF_CONFLICTING || ((dirSign > 0 && ctx.mtf.higherBias == SIGNAL_SELL) || (dirSign < 0 && ctx.mtf.higherBias == SIGNAL_BUY)))
-         mtfBase = (sig.strategyId == STRAT_REVERSAL_SCALPING) ? mtfBase * 0.65 : mtfBase * 0.35;
+      else if(ctx.mtf.assessment == MTF_CONFLICTING || opposesHtf)
+         mtfBase = (sig.strategyId == STRAT_REVERSAL_SCALPING || sig.strategyId == STRAT_RANGE_SCALPING) ? mtfBase * 0.65 : 0.0;
       b.mtfAgreementScore = MathMin(12.0, mtfBase);
 
       // 8. Cost-validated tick edge (0..8)
@@ -246,10 +247,12 @@ public:
       }
       b.strategySuitScore = suitPart + histPart;
 
+      double htfCounterPenalty = (opposesHtf && sig.strategyId != STRAT_REVERSAL_SCALPING && sig.strategyId != STRAT_RANGE_SCALPING) ? -8.0 : 0.0;
+
       b.totalScore = b.regimeScore + b.structureScore + b.trendStrengthScore +
                      b.momentumScore + b.volatilityScore + b.patternConfluence +
                      b.mtfAgreementScore + b.tickEdgeScore + b.executionCostScore +
-                     b.strategySuitScore + perfAdj;
+                     b.strategySuitScore + perfAdj + htfCounterPenalty;
       b.totalScore = MathMax(0.0, MathMin(100.0, b.totalScore));
       b.isValidatedScore = stratStats.hasSufficientSample;
       b.band = ClassifyBand(sig.direction, b.totalScore);

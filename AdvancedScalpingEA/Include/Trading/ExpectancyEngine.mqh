@@ -20,8 +20,8 @@ struct SExpectancyConfig
 
    void ResetDefaults()
    {
-      minRewardRiskRatio = 1.05;
-      minTpToCostRatio   = 1.5;
+      minRewardRiskRatio = 1.30;
+      minTpToCostRatio   = 2.20;
       estSlippagePoints  = 2.0;
       minSampleForExpectancy = 20;
       requireNonNegativeHistoricalExp = true;
@@ -50,7 +50,7 @@ public:
 
    SExpectancyEstimate Evaluate(STradeSignal &sig, const SMarketSnapshot &market,
                                 const CSymbolIntelligence &symIntel, const SStrategyStats &stratStats,
-                                const double proposedLots) const
+                                const double proposedLots, const bool autoAdaptBySymbol = true) const
    {
       SExpectancyEstimate est;
       est.Reset();
@@ -73,6 +73,9 @@ public:
          return est;
       }
 
+      SAdaptiveAssetProfile ap = symIntel.GetAdaptiveAssetProfile();
+      double effTpToCost = autoAdaptBySymbol ? MathMax(m_cfg.minTpToCostRatio, ap.minTpToCostRatio) : m_cfg.minTpToCostRatio;
+
       double effSlip     = symIntel.GetEffectiveSlippagePoints(m_cfg.estSlippagePoints, market.spreadPoints);
       double riskMoney   = symIntel.EstimateRiskMoneyForOrder(sig.direction, proposedLots, sig.entryPrice, sig.stopLoss);
       double rewardMoney = symIntel.EstimateRewardMoneyForOrder(sig.direction, proposedLots, sig.entryPrice, sig.takeProfit);
@@ -86,7 +89,7 @@ public:
       est.hasSufficientSample = (stratStats.totalTrades >= m_cfg.minSampleForExpectancy);
 
       // Economic cost viability check: expected reward must comfortably exceed round-turn cost
-      bool costCleared = (totalCost <= 0.0) || (rewardMoney >= totalCost * m_cfg.minTpToCostRatio);
+      bool costCleared = (totalCost <= 0.0) || (rewardMoney >= totalCost * effTpToCost);
       bool rrCleared   = (est.riskRewardRatio >= m_cfg.minRewardRiskRatio);
 
       if(est.hasSufficientSample)

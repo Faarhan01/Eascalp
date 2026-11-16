@@ -64,8 +64,13 @@ public:
          return false;
       }
 
-      // Prevent chasing already-exhausted blow-off spikes
-      if(MathAbs(ctx.ind.emaDistanceAtr) > 2.40 || ctx.ind.momentumExhaustion)
+      // Prevent chasing already-exhausted blow-off spikes or dead low-ADX chop
+      if(ctx.ind.adxMain < 16.0)
+      {
+         outRejectReason = StringFormat("ADX %.1f too weak for sustained expansion move", ctx.ind.adxMain);
+         return false;
+      }
+      if(MathAbs(ctx.ind.emaDistanceAtr) > 2.25 || ctx.ind.momentumExhaustion)
       {
          outRejectReason = StringFormat("Volatility spike overextended (%.2f ATR from EMA21)", ctx.ind.emaDistanceAtr);
          return false;
@@ -74,41 +79,45 @@ public:
       // Require expanding BB width from prior compression or strong ATR expansion candle
       bool bbExpanding = (ctx.ind.bbWidthPct > ctx.ind.prevBbWidthPct * 1.01) ||
                          (ctx.structure.tightConsolidation || ctx.candle.insideBarCount >= 1);
-      bool impulseBar = (ctx.candle.bodyRatio >= 0.42) && (ctx.candle.relSizeAtr >= 0.85);
+      bool impulseBar = (ctx.candle.bodyRatio >= 0.44) && (ctx.candle.relSizeAtr >= 0.85);
+      double effSlMult = GetEffectiveSlMult(ctx, 1.08);
+      double effTpMult = GetEffectiveTpMult(ctx, 1.15);
 
       if(bbExpanding && impulseBar && ctx.market.close > ctx.market.open &&
-         ctx.market.close > ctx.ind.bbUpper && ctx.ind.rsi < 76.0 &&
-         ctx.ind.macdHist > 0.0 && ctx.ind.emaFast > ctx.ind.emaMedium)
+         ctx.market.close > ctx.ind.bbUpper && ctx.ind.rsi < 74.0 &&
+         ctx.ind.macdHist > 0.0 && ctx.ind.emaFast > ctx.ind.emaMedium &&
+         ctx.mtf.higherBias != SIGNAL_SELL)
       {
-         double slDist = ComputeStructuralSLDist(ctx, SIGNAL_BUY, m_slAtrMult, m_slAtrMult * 1.40);
-         double tpMultEff = ctx.mtf.alignedBullish ? (m_tpAtrMult * 1.20) : m_tpAtrMult;
-         double tpDist = MathMax(slDist * 1.40, ctx.ind.atr * tpMultEff);
-         PopulateCommonSignal(outSignal, ctx, SIGNAL_BUY, slDist, tpDist, 0.78,
-                              "Bullish volatility expansion out of compression breaking upper BB",
-                              StringFormat("VolRatio=%.2f, ShortLong=%.2f, BB_W=%.2f%%, TickAct=%.2f",
-                                           ctx.regime.volatilityRatio, ctx.ind.shortLongVolRatio, ctx.ind.bbWidthPct, ctx.ticks.activityRatio),
+         double slDist = ComputeStructuralSLDist(ctx, SIGNAL_BUY, effSlMult, effSlMult * 1.35);
+         double tpMultEff = ctx.mtf.alignedBullish ? (effTpMult * 1.15) : effTpMult;
+         double tpDist = MathMax(slDist * 1.55, ctx.ind.atr * tpMultEff);
+         PopulateCommonSignal(outSignal, ctx, SIGNAL_BUY, slDist, tpDist, 0.80,
+                              "Bullish volatility expansion out of compression aligned with HTF",
+                              StringFormat("VolRatio=%.2f, ADX=%.1f, BB_W=%.2f%%, TickAct=%.2f",
+                                           ctx.regime.volatilityRatio, ctx.ind.adxMain, ctx.ind.bbWidthPct, ctx.ticks.activityRatio),
                               ctx.structure.summary, ctx.candle.name,
                               ctx.mtf.hasStrongConflict ? ctx.mtf.conflictReason : "None");
          return true;
       }
 
       if(bbExpanding && impulseBar && ctx.market.close < ctx.market.open &&
-         ctx.market.close < ctx.ind.bbLower && ctx.ind.rsi > 24.0 &&
-         ctx.ind.macdHist < 0.0 && ctx.ind.emaFast < ctx.ind.emaMedium)
+         ctx.market.close < ctx.ind.bbLower && ctx.ind.rsi > 26.0 &&
+         ctx.ind.macdHist < 0.0 && ctx.ind.emaFast < ctx.ind.emaMedium &&
+         ctx.mtf.higherBias != SIGNAL_BUY)
       {
-         double slDist = ComputeStructuralSLDist(ctx, SIGNAL_SELL, m_slAtrMult, m_slAtrMult * 1.40);
-         double tpMultEff = ctx.mtf.alignedBearish ? (m_tpAtrMult * 1.20) : m_tpAtrMult;
-         double tpDist = MathMax(slDist * 1.40, ctx.ind.atr * tpMultEff);
-         PopulateCommonSignal(outSignal, ctx, SIGNAL_SELL, slDist, tpDist, 0.78,
-                              "Bearish volatility expansion out of compression breaking lower BB",
-                              StringFormat("VolRatio=%.2f, ShortLong=%.2f, BB_W=%.2f%%, TickAct=%.2f",
-                                           ctx.regime.volatilityRatio, ctx.ind.shortLongVolRatio, ctx.ind.bbWidthPct, ctx.ticks.activityRatio),
+         double slDist = ComputeStructuralSLDist(ctx, SIGNAL_SELL, effSlMult, effSlMult * 1.35);
+         double tpMultEff = ctx.mtf.alignedBearish ? (effTpMult * 1.15) : effTpMult;
+         double tpDist = MathMax(slDist * 1.55, ctx.ind.atr * tpMultEff);
+         PopulateCommonSignal(outSignal, ctx, SIGNAL_SELL, slDist, tpDist, 0.80,
+                              "Bearish volatility expansion out of compression aligned with HTF",
+                              StringFormat("VolRatio=%.2f, ADX=%.1f, BB_W=%.2f%%, TickAct=%.2f",
+                                           ctx.regime.volatilityRatio, ctx.ind.adxMain, ctx.ind.bbWidthPct, ctx.ticks.activityRatio),
                               ctx.structure.summary, ctx.candle.name,
                               ctx.mtf.hasStrongConflict ? ctx.mtf.conflictReason : "None");
          return true;
       }
 
-      outRejectReason = "Volatility expansion lacking compression transition + impulse band break + tick confirmation";
+      outRejectReason = "Volatility expansion lacking compression transition + impulse band break + HTF alignment";
       return false;
    }
 

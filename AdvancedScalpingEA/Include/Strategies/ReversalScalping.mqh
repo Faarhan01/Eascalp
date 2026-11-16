@@ -57,35 +57,31 @@ public:
       }
 
       // Guard against fading strong established trends or high persistence moves
-      if(ctx.ind.adxMain > 36.0 && MathAbs(ctx.ind.directionalPersist) > 0.65 && !ctx.structure.failedBreakout)
+      if(ctx.ind.adxMain > 32.0 && MathAbs(ctx.ind.directionalPersist) > 0.55 && !ctx.structure.failedBreakout)
       {
          outRejectReason = "Runaway directional persistence active without failed breakout";
          return false;
       }
 
-      bool bullStructRev = (ctx.structure.lastEvent == STRUCT_CHOCH_BULL ||
-                            ctx.structure.lastEvent == STRUCT_LIQ_SWEEP_LOW ||
-                            ctx.structure.lastEvent == STRUCT_FAILED_BREAKOUT_DOWN ||
-                            ctx.structure.lastEvent == STRUCT_REJECTION_LOW ||
-                            ctx.structure.structuralReversal || ctx.ind.bullDivergence);
+      double effSlMult = GetEffectiveSlMult(ctx, 1.0);
+      double effTpMult = GetEffectiveTpMult(ctx, 1.0);
+
       bool bullHighConv  = (ctx.ind.bullDivergence ||
                             ctx.structure.lastEvent == STRUCT_CHOCH_BULL ||
                             ctx.structure.lastEvent == STRUCT_FAILED_BREAKOUT_DOWN ||
                             ctx.structure.lastEvent == STRUCT_LIQ_SWEEP_LOW);
-      bool bullCandleRev = (ctx.candle.bias != SIGNAL_SELL) &&
-                           ((ctx.candle.bias == SIGNAL_BUY) ||
-                            (ctx.market.close > ctx.market.open && ctx.market.low <= ctx.structure.nearestSupport + ctx.ind.atr * 0.45));
+      bool bullCandleRev = (ctx.market.close > ctx.market.open && ctx.candle.bias == SIGNAL_BUY);
       bool bullExhaust   = (ctx.ind.bullDivergence || ctx.ind.momentumExhaustion ||
-                            ctx.ind.rsi <= m_rsiOversold || ctx.ind.cci <= -100.0 || ctx.market.low <= ctx.ind.bbLower);
-      bool bullHtfSafe   = (ctx.mtf.higherBias != SIGNAL_SELL) || (bullHighConv && ctx.market.close > ctx.market.open);
+                            ctx.ind.rsi <= m_rsiOversold || ctx.ind.cci <= -110.0 || ctx.market.low <= ctx.ind.bbLower);
+      bool bullHtfSafe   = (ctx.mtf.higherBias != SIGNAL_SELL) || (ctx.ind.bullDivergence && ctx.structure.failedBreakout);
 
-      if(bullStructRev && bullCandleRev && bullExhaust && bullHtfSafe && ctx.ind.emaDistanceAtr <= -0.20)
+      if(bullHighConv && bullCandleRev && bullExhaust && bullHtfSafe && ctx.ind.emaDistanceAtr <= -0.35)
       {
-         double slDist = ComputeStructuralSLDist(ctx, SIGNAL_BUY, m_slAtrMult, m_slAtrMult * 1.40);
-         double tpDist = MathMax(slDist * 1.40, ctx.ind.atr * m_tpAtrMult);
-         double rawConf = ctx.ind.bullDivergence ? 0.80 : 0.74;
+         double slDist = ComputeStructuralSLDist(ctx, SIGNAL_BUY, effSlMult, effSlMult * 1.40);
+         double tpDist = MathMax(slDist * 1.50, ctx.ind.atr * effTpMult);
+         double rawConf = ctx.ind.bullDivergence ? 0.82 : 0.76;
          PopulateCommonSignal(outSignal, ctx, SIGNAL_BUY, slDist, tpDist, rawConf,
-                              "Bullish reversal: exhaustion/divergence + sweep/CHoCH + rejection confirmation",
+                              "Bullish reversal: high-conviction CHoCH/sweep/divergence + rejection candle",
                               StringFormat("RSI=%.1f, CCI=%.1f, Div=%s, DistATR=%.2f",
                                            ctx.ind.rsi, ctx.ind.cci, ctx.ind.bullDivergence ? "Y" : "N", ctx.ind.emaDistanceAtr),
                               ctx.structure.summary, ctx.candle.name,
@@ -93,29 +89,22 @@ public:
          return true;
       }
 
-      bool bearStructRev = (ctx.structure.lastEvent == STRUCT_CHOCH_BEAR ||
-                            ctx.structure.lastEvent == STRUCT_LIQ_SWEEP_HIGH ||
-                            ctx.structure.lastEvent == STRUCT_FAILED_BREAKOUT_UP ||
-                            ctx.structure.lastEvent == STRUCT_REJECTION_HIGH ||
-                            ctx.structure.structuralReversal || ctx.ind.bearDivergence);
       bool bearHighConv  = (ctx.ind.bearDivergence ||
                             ctx.structure.lastEvent == STRUCT_CHOCH_BEAR ||
                             ctx.structure.lastEvent == STRUCT_FAILED_BREAKOUT_UP ||
                             ctx.structure.lastEvent == STRUCT_LIQ_SWEEP_HIGH);
-      bool bearCandleRev = (ctx.candle.bias != SIGNAL_BUY) &&
-                           ((ctx.candle.bias == SIGNAL_SELL) ||
-                            (ctx.market.close < ctx.market.open && ctx.market.high >= ctx.structure.nearestResistance - ctx.ind.atr * 0.45));
+      bool bearCandleRev = (ctx.market.close < ctx.market.open && ctx.candle.bias == SIGNAL_SELL);
       bool bearExhaust   = (ctx.ind.bearDivergence || ctx.ind.momentumExhaustion ||
-                            ctx.ind.rsi >= m_rsiOverbought || ctx.ind.cci >= 100.0 || ctx.market.high >= ctx.ind.bbUpper);
-      bool bearHtfSafe   = (ctx.mtf.higherBias != SIGNAL_BUY) || (bearHighConv && ctx.market.close < ctx.market.open);
+                            ctx.ind.rsi >= m_rsiOverbought || ctx.ind.cci >= 110.0 || ctx.market.high >= ctx.ind.bbUpper);
+      bool bearHtfSafe   = (ctx.mtf.higherBias != SIGNAL_BUY) || (ctx.ind.bearDivergence && ctx.structure.failedBreakout);
 
-      if(bearStructRev && bearCandleRev && bearExhaust && bearHtfSafe && ctx.ind.emaDistanceAtr >= 0.20)
+      if(bearHighConv && bearCandleRev && bearExhaust && bearHtfSafe && ctx.ind.emaDistanceAtr >= 0.35)
       {
-         double slDist = ComputeStructuralSLDist(ctx, SIGNAL_SELL, m_slAtrMult, m_slAtrMult * 1.40);
-         double tpDist = MathMax(slDist * 1.40, ctx.ind.atr * m_tpAtrMult);
-         double rawConf = ctx.ind.bearDivergence ? 0.80 : 0.74;
+         double slDist = ComputeStructuralSLDist(ctx, SIGNAL_SELL, effSlMult, effSlMult * 1.40);
+         double tpDist = MathMax(slDist * 1.50, ctx.ind.atr * effTpMult);
+         double rawConf = ctx.ind.bearDivergence ? 0.82 : 0.76;
          PopulateCommonSignal(outSignal, ctx, SIGNAL_SELL, slDist, tpDist, rawConf,
-                              "Bearish reversal: exhaustion/divergence + sweep/CHoCH + validated rejection candle",
+                              "Bearish reversal: high-conviction CHoCH/sweep/divergence + rejection candle",
                               StringFormat("RSI=%.1f, CCI=%.1f, Div=%s, DistATR=%.2f",
                                            ctx.ind.rsi, ctx.ind.cci, ctx.ind.bearDivergence ? "Y" : "N", ctx.ind.emaDistanceAtr),
                               ctx.structure.summary, ctx.candle.name,
@@ -123,7 +112,7 @@ public:
          return true;
       }
 
-      outRejectReason = "Missing combined structural sweep/CHoCH + validated candle + exhaustion/divergence";
+      outRejectReason = "Missing high-conviction sweep/CHoCH/divergence + reversal candle + exhaustion";
       return false;
    }
 

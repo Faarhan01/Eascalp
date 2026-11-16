@@ -18,16 +18,16 @@ private:
 public:
    CStrategyMicroMomentum() : CStrategyBase(STRAT_MICRO_MOMENTUM, "Micro-Momentum")
    {
-      m_minConsecTicks = 3;
+      m_minConsecTicks = 5;
       m_minVelocityPtsSec = 1.0;
-      m_maxSpreadToAtrPct = 22.0;
+      m_maxSpreadToAtrPct = 20.0;
    }
 
    void Configure(const bool enabled, const double slMult, const double tpMult, const int minSample,
                   const int minConsecTicks, const double minVel, const double maxSpreadAtrPct)
    {
       ConfigureBase(enabled, slMult, tpMult, minSample);
-      m_minConsecTicks    = MathMax(3, MathMin(12, minConsecTicks));
+      m_minConsecTicks    = MathMax(4, MathMin(12, minConsecTicks));
       m_minVelocityPtsSec = MathMax(0.2, minVel);
       m_maxSpreadToAtrPct = MathMax(5.0, MathMin(40.0, maxSpreadAtrPct));
    }
@@ -60,17 +60,22 @@ public:
          outRejectReason = "Tick buffer or ATR not ready";
          return false;
       }
+      if(ctx.ind.adxMain < 20.0)
+      {
+         outRejectReason = StringFormat("ADX %.1f below 20.0 micro-momentum trend floor", ctx.ind.adxMain);
+         return false;
+      }
 
       // Cost-validated tick edge + strict spread ceiling
-      bool strongTickRun = ((ctx.ticks.consecutiveUpTicks >= 4 || ctx.ticks.consecutiveDownTicks >= 4) &&
-                            ctx.ticks.directionalPersistence >= 0.60 &&
-                            MathAbs(ctx.ticks.shortTermDisplacement) > ctx.market.spreadPoints);
+      bool strongTickRun = ((ctx.ticks.consecutiveUpTicks >= m_minConsecTicks || ctx.ticks.consecutiveDownTicks >= m_minConsecTicks) &&
+                            ctx.ticks.directionalPersistence >= 0.62 &&
+                            MathAbs(ctx.ticks.shortTermDisplacement) > ctx.market.spreadPoints * 1.25);
       if(!ctx.ticks.tickProvidesNetEdge && !strongTickRun)
       {
          outRejectReason = "Tick displacement does not clear spread/execution cost safety factor";
          return false;
       }
-      if(ctx.ticks.spreadSpikeDetected || ctx.market.spreadRatio > 1.75)
+      if(ctx.ticks.spreadSpikeDetected || ctx.market.spreadRatio > 1.65)
       {
          outRejectReason = StringFormat("Spread expansion blocked micro-momentum (ratio=%.2f)", ctx.market.spreadRatio);
          return false;
@@ -82,7 +87,7 @@ public:
          outRejectReason = StringFormat("Execution cost too high: spread %.1f%% of ATR (limit %.1f%%)", spreadToAtrPct, m_maxSpreadToAtrPct);
          return false;
       }
-      if(ctx.ticks.momentumDeteriorating || ctx.ticks.directionalPersistence < 0.54)
+      if(ctx.ticks.momentumDeteriorating || ctx.ticks.directionalPersistence < 0.62)
       {
          outRejectReason = StringFormat("Tick persistence %.2f too low or velocity decelerating", ctx.ticks.directionalPersistence);
          return false;
@@ -91,23 +96,26 @@ public:
       double pipPts = (ctx.symbolProfile.pipSize > 0.0 && ctx.symbolProfile.point > 0.0)
                       ? MathMax(1.0, ctx.symbolProfile.pipSize / ctx.symbolProfile.point)
                       : 1.0;
-      double effMinVel = MathMax(0.25, m_minVelocityPtsSec * MathMax(0.25, pipPts * 0.1));
+      double effMinVel = MathMax(0.30, m_minVelocityPtsSec * MathMax(0.25, pipPts * 0.1));
+      double effSlMult = GetEffectiveSlMult(ctx, 1.00);
+      double effTpMult = GetEffectiveTpMult(ctx, 0.95);
 
       bool bullBurst = (ctx.ticks.consecutiveUpTicks >= m_minConsecTicks &&
                         ctx.ticks.priceVelocity >= effMinVel &&
-                        ctx.ticks.priceAcceleration >= -0.5 &&
-                        ctx.ticks.microTrendBias >= 0.28 &&
-                        ctx.ind.emaFast >= ctx.ind.emaMedium &&
+                        ctx.ticks.priceAcceleration >= 0.0 &&
+                        ctx.ticks.microTrendBias >= 0.35 &&
+                        ctx.ind.emaFast > ctx.ind.emaMedium &&
+                        ctx.ind.emaMedium > ctx.ind.emaSlow &&
                         ctx.mtf.higherBias != SIGNAL_SELL);
 
       if(bullBurst)
       {
-         double slDist = ComputeStructuralSLDist(ctx, SIGNAL_BUY, m_slAtrMult, m_slAtrMult * 1.30);
-         double tpDist = MathMax(slDist * 1.25, ctx.ind.atr * m_tpAtrMult);
-         PopulateCommonSignal(outSignal, ctx, SIGNAL_BUY, slDist, tpDist, 0.72,
-                              "Bullish cost-validated tick velocity, persistence & acceleration burst",
-                              StringFormat("UpTicks=%d, Vel=%.2f pts/s, Persist=%.2f, Spread=%.1f%% ATR",
-                                           ctx.ticks.consecutiveUpTicks, ctx.ticks.priceVelocity, ctx.ticks.directionalPersistence, spreadToAtrPct),
+         double slDist = ComputeStructuralSLDist(ctx, SIGNAL_BUY, effSlMult, effSlMult * 1.30);
+         double tpDist = MathMax(slDist * 1.40, ctx.ind.atr * effTpMult);
+         PopulateCommonSignal(outSignal, ctx, SIGNAL_BUY, slDist, tpDist, 0.74,
+                              "Bullish cost-validated tick velocity, EMA-stack & HTF burst",
+                              StringFormat("UpTicks=%d, Vel=%.2f pts/s, Persist=%.2f, ADX=%.1f",
+                                           ctx.ticks.consecutiveUpTicks, ctx.ticks.priceVelocity, ctx.ticks.directionalPersistence, ctx.ind.adxMain),
                               ctx.structure.summary, ctx.candle.name,
                               ctx.mtf.hasStrongConflict ? ctx.mtf.conflictReason : "None");
          return true;
@@ -115,25 +123,26 @@ public:
 
       bool bearBurst = (ctx.ticks.consecutiveDownTicks >= m_minConsecTicks &&
                         ctx.ticks.priceVelocity <= -effMinVel &&
-                        ctx.ticks.priceAcceleration <= 0.5 &&
-                        ctx.ticks.microTrendBias <= -0.28 &&
-                        ctx.ind.emaFast <= ctx.ind.emaMedium &&
+                        ctx.ticks.priceAcceleration <= 0.0 &&
+                        ctx.ticks.microTrendBias <= -0.35 &&
+                        ctx.ind.emaFast < ctx.ind.emaMedium &&
+                        ctx.ind.emaMedium < ctx.ind.emaSlow &&
                         ctx.mtf.higherBias != SIGNAL_BUY);
 
       if(bearBurst)
       {
-         double slDist = ComputeStructuralSLDist(ctx, SIGNAL_SELL, m_slAtrMult, m_slAtrMult * 1.30);
-         double tpDist = MathMax(slDist * 1.25, ctx.ind.atr * m_tpAtrMult);
-         PopulateCommonSignal(outSignal, ctx, SIGNAL_SELL, slDist, tpDist, 0.72,
-                              "Bearish cost-validated tick velocity, persistence & acceleration burst",
-                              StringFormat("DownTicks=%d, Vel=%.2f pts/s, Persist=%.2f, Spread=%.1f%% ATR",
-                                           ctx.ticks.consecutiveDownTicks, ctx.ticks.priceVelocity, ctx.ticks.directionalPersistence, spreadToAtrPct),
+         double slDist = ComputeStructuralSLDist(ctx, SIGNAL_SELL, effSlMult, effSlMult * 1.30);
+         double tpDist = MathMax(slDist * 1.40, ctx.ind.atr * effTpMult);
+         PopulateCommonSignal(outSignal, ctx, SIGNAL_SELL, slDist, tpDist, 0.74,
+                              "Bearish cost-validated tick velocity, EMA-stack & HTF burst",
+                              StringFormat("DownTicks=%d, Vel=%.2f pts/s, Persist=%.2f, ADX=%.1f",
+                                           ctx.ticks.consecutiveDownTicks, ctx.ticks.priceVelocity, ctx.ticks.directionalPersistence, ctx.ind.adxMain),
                               ctx.structure.summary, ctx.candle.name,
                               ctx.mtf.hasStrongConflict ? ctx.mtf.conflictReason : "None");
          return true;
       }
 
-      outRejectReason = "Tick velocity/persistence/HTF alignment criteria not met";
+      outRejectReason = "Tick velocity/persistence/EMA-stack/HTF criteria not met";
       return false;
    }
 

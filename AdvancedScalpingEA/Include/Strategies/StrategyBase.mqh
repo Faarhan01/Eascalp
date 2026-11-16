@@ -10,19 +10,20 @@
 
 struct SAnalysisContext
 {
-   SSymbolProfile      symbolProfile;
-   SMarketSnapshot     market;
-   STickMetrics        ticks;
-   SIndicatorValues    ind;
-   SStructureState     structure;
-   SCandleSignal       candle;
-   SChartPatternSignal chartPattern;
-   SRegimeState        regime;
-   SMTFAnalysis        mtf;
+   SSymbolProfile        symbolProfile;
+   SAdaptiveAssetProfile assetProfile;
+   SMarketSnapshot       market;
+   STickMetrics          ticks;
+   SIndicatorValues      ind;
+   SStructureState       structure;
+   SCandleSignal         candle;
+   SChartPatternSignal   chartPattern;
+   SRegimeState          regime;
+   SMTFAnalysis          mtf;
 
    void Reset()
    {
-      symbolProfile.Reset(); market.Reset(); ticks.Reset(); ind.Reset();
+      symbolProfile.Reset(); assetProfile.ResetDefaults(); market.Reset(); ticks.Reset(); ind.Reset();
       structure.Reset(); candle.Reset(); chartPattern.Reset();
       regime.Reset(); mtf.Reset();
    }
@@ -34,6 +35,7 @@ protected:
    ENUM_STRATEGY_ID m_id;
    string           m_name;
    bool             m_enabled;
+   bool             m_autoAdaptBySymbol;
    double           m_slAtrMult;
    double           m_tpAtrMult;
    int              m_minSampleSize;
@@ -145,8 +147,9 @@ public:
       m_id = id;
       m_name = name;
       m_enabled = true;
-      m_slAtrMult = 1.5;
-      m_tpAtrMult = 2.2;
+      m_autoAdaptBySymbol = true;
+      m_slAtrMult = 1.60;
+      m_tpAtrMult = 2.80;
       m_minSampleSize = 20;
       m_recentHead = 0;
       m_recentCount = 0;
@@ -160,6 +163,20 @@ public:
    }
 
    virtual ~CStrategyBase() {}
+
+   void SetAutoAdaptBySymbol(const bool autoAdapt) { m_autoAdaptBySymbol = autoAdapt; }
+
+   double GetEffectiveSlMult(const SAnalysisContext &ctx, const double stratScale = 1.0) const
+   {
+      double base = m_autoAdaptBySymbol ? MathMax(m_slAtrMult, ctx.assetProfile.slAtrMult * stratScale) : m_slAtrMult;
+      return MathMax(0.6, MathMin(6.0, base));
+   }
+
+   double GetEffectiveTpMult(const SAnalysisContext &ctx, const double stratScale = 1.0) const
+   {
+      double base = m_autoAdaptBySymbol ? MathMax(m_tpAtrMult, ctx.assetProfile.tpAtrMult * stratScale) : m_tpAtrMult;
+      return MathMax(0.8, MathMin(10.0, base));
+   }
 
    virtual void ConfigureBase(const bool enabled, const double slAtrMult, const double tpAtrMult, const int minSampleSize)
    {

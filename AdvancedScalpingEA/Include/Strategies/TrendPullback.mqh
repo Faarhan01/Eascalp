@@ -66,30 +66,30 @@ public:
       double tol = ctx.ind.atr * m_pullbackAtrTol;
       bool bullStack = (ctx.ind.emaFast > ctx.ind.emaMedium && ctx.ind.emaMedium > ctx.ind.emaSlow);
       bool bearStack = (ctx.ind.emaFast < ctx.ind.emaMedium && ctx.ind.emaMedium < ctx.ind.emaSlow);
+      double effSlMult = GetEffectiveSlMult(ctx, 1.0);
+      double effTpMult = GetEffectiveTpMult(ctx, 1.0);
 
-      bool strongLtfTrend = (ctx.regime.regime == REGIME_STRONG_BULL_TREND || ctx.regime.regime == REGIME_ESTABLISHED_BULL ||
-                             ctx.regime.regime == REGIME_STRONG_BEAR_TREND || ctx.regime.regime == REGIME_ESTABLISHED_BEAR);
-
-      if(bullStack && ctx.structure.structureBias >= 0 && (ctx.mtf.higherBias != SIGNAL_SELL || strongLtfTrend))
+      if(bullStack && ctx.structure.structureBias >= 0 && ctx.mtf.higherBias != SIGNAL_SELL &&
+         ctx.ind.adxPlusDI > ctx.ind.adxMinusDI)
       {
          // Measure pullback depth relative to recent swing range
          double swingSpan = MathMax(ctx.ind.atr * 1.2, ctx.structure.lastSwingHigh - ctx.structure.lastSwingLow);
          double retraceDepth = (ctx.structure.lastSwingHigh - ctx.market.low) / swingSpan;
-         bool validDepth = (retraceDepth >= 0.10 && retraceDepth <= 0.88);
+         bool validDepth = (retraceDepth >= 0.12 && retraceDepth <= 0.82);
          bool touchedZone = (ctx.market.low <= ctx.ind.emaFast + tol || ctx.market.low <= ctx.ind.emaMedium + tol) &&
                             (ctx.market.close > ctx.ind.emaSlow) &&
-                            (ctx.market.close >= ctx.ind.emaMedium - ctx.ind.atr * 0.45);
-         bool momRecovery = (ctx.market.close > ctx.market.open || ctx.candle.bias == SIGNAL_BUY) &&
+                            (ctx.market.close >= ctx.ind.emaMedium - ctx.ind.atr * 0.15);
+         bool momRecovery = (ctx.market.close > ctx.market.open) &&
                             (ctx.candle.bias != SIGNAL_SELL) &&
                             (ctx.ind.macdHist >= ctx.ind.prevMacdHist || ctx.ind.stochK > ctx.ind.stochD) &&
-                            (ctx.ind.rsi >= 38.0 && ctx.ind.rsi <= 70.0);
+                            (ctx.ind.rsi >= 42.0 && ctx.ind.rsi <= 68.0);
 
          if(validDepth && touchedZone && momRecovery)
          {
-            double slDist = ComputeStructuralSLDist(ctx, SIGNAL_BUY, m_slAtrMult, m_slAtrMult * 1.45);
-            double tpMultEff = (ctx.mtf.alignedBullish && ctx.ind.adxMain >= 24.0) ? (m_tpAtrMult * 1.25) : m_tpAtrMult;
-            double tpDist = MathMax(slDist * 1.35, ctx.ind.atr * tpMultEff);
-            PopulateCommonSignal(outSignal, ctx, SIGNAL_BUY, slDist, tpDist, 0.80,
+            double slDist = ComputeStructuralSLDist(ctx, SIGNAL_BUY, effSlMult, effSlMult * 1.45);
+            double tpMultEff = (ctx.mtf.alignedBullish && ctx.ind.adxMain >= 22.0) ? (effTpMult * 1.25) : effTpMult;
+            double tpDist = MathMax(slDist * 1.50, ctx.ind.atr * tpMultEff);
+            PopulateCommonSignal(outSignal, ctx, SIGNAL_BUY, slDist, tpDist, 0.82,
                                  StringFormat("Bull pullback (%.0f%% retrace) to EMA zone/structure with momentum recovery", retraceDepth * 100.0),
                                  StringFormat("ADX=%.1f, RSI=%.1f, MACD_H slope+", ctx.ind.adxMain, ctx.ind.rsi),
                                  ctx.structure.summary, ctx.candle.name,
@@ -100,25 +100,26 @@ public:
          return false;
       }
 
-      if(bearStack && ctx.structure.structureBias <= 0 && (ctx.mtf.higherBias != SIGNAL_BUY || strongLtfTrend))
+      if(bearStack && ctx.structure.structureBias <= 0 && ctx.mtf.higherBias != SIGNAL_BUY &&
+         ctx.ind.adxMinusDI > ctx.ind.adxPlusDI)
       {
          double swingSpan = MathMax(ctx.ind.atr * 1.2, ctx.structure.lastSwingHigh - ctx.structure.lastSwingLow);
          double retraceDepth = (ctx.market.high - ctx.structure.lastSwingLow) / swingSpan;
-         bool validDepth = (retraceDepth >= 0.10 && retraceDepth <= 0.88);
+         bool validDepth = (retraceDepth >= 0.12 && retraceDepth <= 0.82);
          bool touchedZone = (ctx.market.high >= ctx.ind.emaFast - tol || ctx.market.high >= ctx.ind.emaMedium - tol) &&
                             (ctx.market.close < ctx.ind.emaSlow) &&
-                            (ctx.market.close <= ctx.ind.emaMedium + ctx.ind.atr * 0.45);
-         bool momRecovery = (ctx.market.close < ctx.market.open || ctx.candle.bias == SIGNAL_SELL) &&
+                            (ctx.market.close <= ctx.ind.emaMedium + ctx.ind.atr * 0.15);
+         bool momRecovery = (ctx.market.close < ctx.market.open) &&
                             (ctx.candle.bias != SIGNAL_BUY) &&
                             (ctx.ind.macdHist <= ctx.ind.prevMacdHist || ctx.ind.stochK < ctx.ind.stochD) &&
-                            (ctx.ind.rsi <= 62.0 && ctx.ind.rsi >= 30.0);
+                            (ctx.ind.rsi <= 58.0 && ctx.ind.rsi >= 32.0);
 
          if(validDepth && touchedZone && momRecovery)
          {
-            double slDist = ComputeStructuralSLDist(ctx, SIGNAL_SELL, m_slAtrMult, m_slAtrMult * 1.45);
-            double tpMultEff = (ctx.mtf.alignedBearish && ctx.ind.adxMain >= 24.0) ? (m_tpAtrMult * 1.25) : m_tpAtrMult;
-            double tpDist = MathMax(slDist * 1.35, ctx.ind.atr * tpMultEff);
-            PopulateCommonSignal(outSignal, ctx, SIGNAL_SELL, slDist, tpDist, 0.80,
+            double slDist = ComputeStructuralSLDist(ctx, SIGNAL_SELL, effSlMult, effSlMult * 1.45);
+            double tpMultEff = (ctx.mtf.alignedBearish && ctx.ind.adxMain >= 22.0) ? (effTpMult * 1.25) : effTpMult;
+            double tpDist = MathMax(slDist * 1.50, ctx.ind.atr * tpMultEff);
+            PopulateCommonSignal(outSignal, ctx, SIGNAL_SELL, slDist, tpDist, 0.82,
                                  StringFormat("Bear pullback (%.0f%% retrace) to EMA zone/structure with momentum recovery", retraceDepth * 100.0),
                                  StringFormat("ADX=%.1f, RSI=%.1f, MACD_H slope-", ctx.ind.adxMain, ctx.ind.rsi),
                                  ctx.structure.summary, ctx.candle.name,

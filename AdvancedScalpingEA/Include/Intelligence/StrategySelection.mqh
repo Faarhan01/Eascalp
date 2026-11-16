@@ -108,14 +108,24 @@ public:
       if(bestIdx < 0 && m_autoSelectBestOnly) return false;
 
       SStrategyStats st = strat.GetStats();
+      int rIdx = (int)regimeState.regime;
+
       if(!m_autoSelectBestOnly)
       {
-         // Bench chronically losing strategies once minimum statistical sample confirms deterioration
-         if(st.totalTrades >= m_minSampleSize &&
+         // Bench chronically losing strategies once early/statistical sample confirms deterioration
+         if(st.totalTrades >= MathMin(10, m_minSampleSize) &&
             st.profitFactor < 0.78 &&
             st.expectedValue < 0.0 &&
             st.recentNetProfit < 0.0)
             return false;
+
+         // Bench strategies proven unprofitable in this specific market regime
+         if(rIdx >= 0 && rIdx <= EA_MAX_REGIMES && st.regimeTrades[rIdx] >= 6)
+         {
+            double regWr = (double)st.regimeWins[rIdx] / (double)st.regimeTrades[rIdx];
+            if(st.regimeNetProfit[rIdx] < 0.0 && regWr < 0.25 && idx != bestIdx)
+               return false;
+         }
          return true;
       }
 

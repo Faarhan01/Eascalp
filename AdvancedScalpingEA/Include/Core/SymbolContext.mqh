@@ -25,6 +25,7 @@ private:
    string               m_symbol;
    ENUM_TIMEFRAMES      m_primaryTF;
    bool                 m_initialized;
+   bool                 m_autoAdaptBySymbol;
    datetime             m_lastBarObsLogged;
    datetime             m_lastSymRefresh;
    double               m_lastAtr;
@@ -49,6 +50,7 @@ public:
       m_symbol = "";
       m_primaryTF = PERIOD_M5;
       m_initialized = false;
+      m_autoAdaptBySymbol = true;
       m_lastBarObsLogged = 0;
       m_lastSymRefresh = 0;
       m_lastAtr = 0.0;
@@ -76,11 +78,13 @@ public:
                    const double adxStrong, const double adxWeak, const double volHigh, const double volLow,
                    const double spreadUnstable, const double dojiBodyMax, const double pinWickMin,
                    const int patternLookback, const double patternTolAtr,
-                   const double wHtf, const double wItf, const double wLtf, CDiagnostics *diag)
+                   const double wHtf, const double wItf, const double wLtf,
+                   const bool autoAdaptBySymbol, CDiagnostics *diag)
    {
       Release();
       m_symbol = symbol;
       m_primaryTF = primaryTF;
+      m_autoAdaptBySymbol = autoAdaptBySymbol;
       m_lastBarObsLogged = 0;
       m_lastSymRefresh = 0;
       m_lastAtr = 0.0;
@@ -91,11 +95,18 @@ public:
       if(!m_symIntel.Initialize(m_symbol, m_primaryTF, fallbackCommPerLot, diag))
          return false;
 
+      SAdaptiveAssetProfile ap = m_symIntel.GetAdaptiveAssetProfile();
+      double effAdxStrong = m_autoAdaptBySymbol ? ap.adxStrongThresh : adxStrong;
+      double effAdxWeak   = m_autoAdaptBySymbol ? ap.adxWeakThresh   : adxWeak;
+      double effVolHigh   = m_autoAdaptBySymbol ? ap.volHighRatio    : volHigh;
+      double effVolLow    = m_autoAdaptBySymbol ? ap.volLowRatio     : volLow;
+      double effSprUnst   = m_autoAdaptBySymbol ? ap.spreadUnstableRatio : spreadUnstable;
+
       m_marketData.Initialize(m_symbol, m_primaryTF, spreadAvgWindow, GetPointer(m_symIntel), diag);
       m_tickAnalysis.Initialize(m_symbol, tickWindowSize, GetPointer(m_symIntel));
       m_indEngine.Initialize(m_symbol, m_primaryTF, indCfg, diag);
       m_structure.Configure(swingStrength, structureLookback, zoneAtrMult);
-      m_regime.Configure(adxStrong, adxWeak, volHigh, volLow, spreadUnstable);
+      m_regime.Configure(effAdxStrong, effAdxWeak, effVolHigh, effVolLow, effSprUnst);
       m_mtf.ConfigureWeights(wHtf, wItf, wLtf);
       m_mtf.Initialize(m_symbol, higherTF, interTF, m_primaryTF, diag);
       m_candles.Configure(dojiBodyMax, pinWickMin);
@@ -153,6 +164,7 @@ public:
       }
 
       m_ctx.symbolProfile = prof;
+      m_ctx.assetProfile  = m_symIntel.GetAdaptiveAssetProfile();
       m_ctx.market        = market;
       m_ctx.ticks         = ticks;
       m_ctx.ind           = ind;

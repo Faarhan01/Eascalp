@@ -28,14 +28,14 @@ struct SValidationConfig
 
    void ResetDefaults()
    {
-      minSignalScore = 48.0;
+      minSignalScore = 60.0;
       maxSpreadPoints = 0.0;
       maxSpreadRatio = 2.50;
-      maxSpreadAtrPct = 32.0;
+      maxSpreadAtrPct = 28.0;
       maxVolatilityRatio = 3.20;
       minVolatilityRatio = 0.30;
       minRequiredBars = 50;
-      requireMtfNoStrongConflict = false;
+      requireMtfNoStrongConflict = true;
       requireEconomicallyViableExp = true;
       enableSessionFilter = false;
       sessionStartHour = 7;
@@ -108,11 +108,19 @@ public:
    SValidationResult Validate(const STradeSignal &sig, const SSymbolProfile &prof, const SMarketSnapshot &market,
                               const SIndicatorValues &ind, const SRegimeState &regime, const SMTFAnalysis &mtf,
                               const SRiskStatus &risk, const CSymbolIntelligence &symIntel,
-                              const double proposedLots, const bool allowExecMode)
+                              const double proposedLots, const bool allowExecMode,
+                              const bool autoAdaptBySymbol = true)
    {
       SValidationResult res;
       res.Reset();
       m_stats.totalEvaluated++;
+
+      SAdaptiveAssetProfile ap = symIntel.GetAdaptiveAssetProfile();
+      double effMinScore    = autoAdaptBySymbol ? MathMax(m_cfg.minSignalScore, ap.minSignalScore) : m_cfg.minSignalScore;
+      double effMaxSprRatio = autoAdaptBySymbol ? MathMax(m_cfg.maxSpreadRatio, ap.maxSpreadRatio) : m_cfg.maxSpreadRatio;
+      double effMaxSprAtr   = autoAdaptBySymbol ? MathMax(m_cfg.maxSpreadAtrPct, ap.maxSpreadAtrPct) : m_cfg.maxSpreadAtrPct;
+      double effMaxVolRatio = autoAdaptBySymbol ? MathMax(m_cfg.maxVolatilityRatio, ap.maxVolatilityRatio) : m_cfg.maxVolatilityRatio;
+      double effMinVolRatio = autoAdaptBySymbol ? MathMin(m_cfg.minVolatilityRatio, ap.minVolatilityRatio) : m_cfg.minVolatilityRatio;
 
       // 1. Signal direction and validity
       if(!sig.isValid || sig.direction == SIGNAL_NONE)
@@ -124,11 +132,11 @@ public:
       }
 
       // 2. Signal quality score threshold
-      if(sig.compositeScore < m_cfg.minSignalScore)
+      if(sig.compositeScore < effMinScore)
       {
          m_stats.rejLowScore++;
          res.rejectionCode = "LOW_SIGNAL_SCORE";
-         res.rejectionReason = StringFormat("Composite score %.1f below threshold %.1f.", sig.compositeScore, m_cfg.minSignalScore);
+         res.rejectionReason = StringFormat("Composite score %.1f below threshold %.1f.", sig.compositeScore, effMinScore);
          return res;
       }
 
@@ -160,21 +168,21 @@ public:
          res.rejectionReason = StringFormat("Spread %.1f pts exceeds cap %.1f pts.", market.spreadPoints, spreadCap);
          return res;
       }
-      if(market.spreadRatio > m_cfg.maxSpreadRatio)
+      if(market.spreadRatio > effMaxSprRatio)
       {
          m_stats.rejSpread++;
          res.rejectionCode = "SPREAD_SPIKE";
-         res.rejectionReason = StringFormat("Spread ratio %.2fx exceeds limit %.2fx.", market.spreadRatio, m_cfg.maxSpreadRatio);
+         res.rejectionReason = StringFormat("Spread ratio %.2fx exceeds limit %.2fx.", market.spreadRatio, effMaxSprRatio);
          return res;
       }
       if(ind.isReady && ind.atr > 0.0 && prof.point > 0.0)
       {
          double spreadAtrPct = ((market.spreadPoints * prof.point) / ind.atr) * 100.0;
-         if(spreadAtrPct > m_cfg.maxSpreadAtrPct)
+         if(spreadAtrPct > effMaxSprAtr)
          {
             m_stats.rejSpread++;
             res.rejectionCode = "SPREAD_TO_ATR_HIGH";
-            res.rejectionReason = StringFormat("Spread consumes %.1f%% of ATR (limit %.1f%%).", spreadAtrPct, m_cfg.maxSpreadAtrPct);
+            res.rejectionReason = StringFormat("Spread consumes %.1f%% of ATR (limit %.1f%%).", spreadAtrPct, effMaxSprAtr);
             return res;
          }
       }
@@ -187,11 +195,11 @@ public:
          res.rejectionReason = "Market regime classified as Unstable / Abnormal.";
          return res;
       }
-      if(regime.volatilityRatio > m_cfg.maxVolatilityRatio || regime.volatilityRatio < m_cfg.minVolatilityRatio)
+      if(regime.volatilityRatio > effMaxVolRatio || regime.volatilityRatio < effMinVolRatio)
       {
          m_stats.rejVolatility++;
          res.rejectionCode = "VOLATILITY_OUT_OF_BOUNDS";
-         res.rejectionReason = StringFormat("Volatility ratio %.2f outside [%.2f, %.2f].", regime.volatilityRatio, m_cfg.minVolatilityRatio, m_cfg.maxVolatilityRatio);
+         res.rejectionReason = StringFormat("Volatility ratio %.2f outside [%.2f, %.2f].", regime.volatilityRatio, effMinVolRatio, effMaxVolRatio);
          return res;
       }
 

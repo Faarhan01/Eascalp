@@ -7,7 +7,7 @@
 #define __ASEA_CORE_TYPES_MQH__
 
 #define EA_PROJECT_NAME       "AdvancedScalpingEA"
-#define EA_PROJECT_VERSION    "2.2.0"
+#define EA_PROJECT_VERSION    "2.3.0"
 #define EA_DATA_ROOT          "AdvancedScalpingEA"
 #define EA_MAX_STRATEGIES     7
 #define EA_MAX_TF_SLOTS       14
@@ -242,6 +242,8 @@ struct SSymbolProfile
    bool                  isHedgingAccount;
    bool                  sessionOpenNow;
    bool                  isSynthetic24x7;
+   bool                  isStepIndex;
+   bool                  isSyntheticBurst;
    bool                  hasRealVolume;
    int                   availableBarsPrimary;
    datetime              lastInspected;
@@ -265,8 +267,63 @@ struct SSymbolProfile
       pipSize = 0.0001; autoMaxSpreadPts = 350.0; recommendedSlippagePts = 25;
       measuredAvgSlippagePts = 0.0; measuredFillCount = 0;
       isHedgingAccount = true;
-      sessionOpenNow = false; isSynthetic24x7 = false; hasRealVolume = false;
+      sessionOpenNow = false; isSynthetic24x7 = false;
+      isStepIndex = false; isSyntheticBurst = false; hasRealVolume = false;
       availableBarsPrimary = 0; lastInspected = 0; isValid = false;
+   }
+};
+
+struct SAdaptiveAssetProfile
+{
+   string           profileName;
+   double           slAtrMult;
+   double           tpAtrMult;
+   double           beTriggerAtr;
+   double           partialTriggerAtr;
+   double           partialFraction;
+   double           trailStartAtr;
+   double           trailStepAtr;
+   double           adxStrongThresh;
+   double           adxWeakThresh;
+   double           volHighRatio;
+   double           volLowRatio;
+   double           spreadUnstableRatio;
+   double           maxSpreadRatio;
+   double           maxSpreadAtrPct;
+   double           maxVolatilityRatio;
+   double           minVolatilityRatio;
+   double           minTpToCostRatio;
+   double           minSignalScore;
+   int              lossCooldownBars;
+   int              recommendedSlippagePts;
+   bool             allow24x7Continuous;
+   string           tuningNotes;
+
+   void ResetDefaults()
+   {
+      profileName = "Forex Major";
+      slAtrMult = 1.60;
+      tpAtrMult = 2.80;
+      beTriggerAtr = 1.45;
+      partialTriggerAtr = 1.90;
+      partialFraction = 0.40;
+      trailStartAtr = 2.00;
+      trailStepAtr = 1.00;
+      adxStrongThresh = 26.0;
+      adxWeakThresh = 17.0;
+      volHighRatio = 1.45;
+      volLowRatio = 0.70;
+      spreadUnstableRatio = 2.80;
+      maxSpreadRatio = 2.50;
+      maxSpreadAtrPct = 28.0;
+      maxVolatilityRatio = 3.20;
+      minVolatilityRatio = 0.30;
+      minTpToCostRatio = 2.20;
+      minSignalScore = 60.0;
+      lossCooldownBars = 3;
+      recommendedSlippagePts = 25;
+      allow24x7Continuous = false;
+      tuningNotes = "Default balanced FX scaling";
    }
 };
 
@@ -936,8 +993,8 @@ struct SIntelligenceSummary
       stage1RawObs = "0 observations";
       stage2HistoricalFinding = "Awaiting minimum sample";
       stage3Recommendation = "None";
-      stage4ValidatedConfig = "ReadyToTrade_v2.2.0";
-      stage5ActiveConfig = "ReadyToTrade_v2.2.0";
+      stage4ValidatedConfig = "AutoAdaptive_v2.3.0";
+      stage5ActiveConfig = "AutoAdaptive_v2.3.0";
       lastValidationTime = 0;
       researchSummary = "Collecting minimum sample sizes";
    }

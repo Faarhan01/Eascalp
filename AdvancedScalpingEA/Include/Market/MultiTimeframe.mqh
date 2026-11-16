@@ -37,7 +37,7 @@ private:
       if(hFast == INVALID_HANDLE || hSlow == INVALID_HANDLE)
          return SIGNAL_NONE;
 
-      double fast[2], slow[2], extra[2];
+      double fast[], slow[], extra[];
       ArraySetAsSeries(fast, true);
       ArraySetAsSeries(slow, true);
       ArraySetAsSeries(extra, true);
@@ -50,24 +50,28 @@ private:
 
       if(isAdx && hExtra != INVALID_HANDLE)
       {
-         double plusDI[1], minusDI[1];
+         double plusDI[], minusDI[];
+         ArraySetAsSeries(plusDI, true);
+         ArraySetAsSeries(minusDI, true);
          if(CopyBuffer(hExtra, 0, 1, 1, extra) >= 1 &&
             CopyBuffer(hExtra, 1, 1, 1, plusDI) >= 1 &&
             CopyBuffer(hExtra, 2, 1, 1, minusDI) >= 1)
          {
-            if(fast[0] > slow[0] && risingFast && plusDI[0] >= minusDI[0] && extra[0] >= 16.0)
+            if(fast[0] > slow[0] && risingFast && plusDI[0] > minusDI[0] && extra[0] >= 16.0)
                return SIGNAL_BUY;
-            if(fast[0] < slow[0] && fallingFast && minusDI[0] >= plusDI[0] && extra[0] >= 16.0)
+            if(fast[0] < slow[0] && fallingFast && minusDI[0] > plusDI[0] && extra[0] >= 16.0)
                return SIGNAL_SELL;
          }
+         return SIGNAL_NONE;
       }
       else if(hExtra != INVALID_HANDLE)
       {
          if(CopyBuffer(hExtra, 0, 1, 1, extra) >= 1)
          {
-            if(fast[0] > slow[0] && extra[0] > 51.0) return SIGNAL_BUY;
-            if(fast[0] < slow[0] && extra[0] < 49.0) return SIGNAL_SELL;
+            if(fast[0] > slow[0] && risingFast && extra[0] > 51.0)  return SIGNAL_BUY;
+            if(fast[0] < slow[0] && fallingFast && extra[0] < 49.0) return SIGNAL_SELL;
          }
+         return SIGNAL_NONE;
       }
 
       if(fast[0] > slow[0] && risingFast)  return SIGNAL_BUY;

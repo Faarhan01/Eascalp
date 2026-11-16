@@ -61,8 +61,8 @@ struct SPersistedState
       signalsGenerated = 0;
       signalsAccepted = 0;
       signalsRejected = 0;
-      lastValidatedConfig = "ReadyToTrade_v2.2.0";
-      activeConfigVersion = "ReadyToTrade_v2.2.0";
+      lastValidatedConfig = "AutoAdaptive_v2.3.0";
+      activeConfigVersion = "AutoAdaptive_v2.3.0";
       lastValidationTime = 0;
    }
 };

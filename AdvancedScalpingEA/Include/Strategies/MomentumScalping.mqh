@@ -67,37 +67,43 @@ public:
          return false;
       }
 
-      bool bullTickOk = (!ctx.ticks.isReady || ctx.ticks.microTrendBias > 0.02);
-      bool bearTickOk = (!ctx.ticks.isReady || ctx.ticks.microTrendBias < -0.02);
+      bool bullTickOk = (!ctx.ticks.isReady || ctx.ticks.microTrendBias > 0.05);
+      bool bearTickOk = (!ctx.ticks.isReady || ctx.ticks.microTrendBias < -0.05);
+      double effSlMult = GetEffectiveSlMult(ctx, 1.0);
+      double effTpMult = GetEffectiveTpMult(ctx, 1.0);
 
-      bool bullMom = (ctx.ind.macdHist > 0.0 &&
-                      (ctx.ind.macdHist >= ctx.ind.prevMacdHist || ctx.ind.momentumAccel >= -0.02) &&
-                      (ctx.ind.roc >= m_minRocAbs || ctx.ind.priceDisplacementAtr >= 0.55) &&
-                      ctx.ind.directionalPersist >= 0.05 &&
-                      ctx.ind.rsi > 49.0 && ctx.ind.rsi < 74.0 &&
+      bool bullMom = (ctx.mtf.higherBias != SIGNAL_SELL &&
+                      ctx.ind.adxMain >= 18.0 &&
+                      ctx.ind.macdHist > 0.0 &&
+                      ctx.ind.macdHist >= ctx.ind.prevMacdHist &&
+                      (ctx.ind.priceDisplacementAtr >= 0.60 || (ctx.ind.roc >= m_minRocAbs && ctx.ind.priceDisplacementAtr > 0.30)) &&
+                      ctx.ind.directionalPersist >= 0.15 &&
+                      ctx.ind.rsi >= 50.0 && ctx.ind.rsi <= 72.0 &&
                       ctx.ind.adxPlusDI > ctx.ind.adxMinusDI &&
-                      ctx.ind.emaFast > ctx.ind.emaMedium &&
+                      ctx.ind.emaFast > ctx.ind.emaMedium && ctx.ind.emaMedium > ctx.ind.emaSlow &&
                       ctx.candle.bias != SIGNAL_SELL &&
-                      bullTickOk && ctx.market.close > ctx.ind.emaFast);
+                      bullTickOk && ctx.market.close > ctx.market.open && ctx.market.close > ctx.ind.emaFast);
 
-      bool bearMom = (ctx.ind.macdHist < 0.0 &&
-                      (ctx.ind.macdHist <= ctx.ind.prevMacdHist || ctx.ind.momentumAccel <= 0.02) &&
-                      (ctx.ind.roc <= -m_minRocAbs || ctx.ind.priceDisplacementAtr <= -0.55) &&
-                      ctx.ind.directionalPersist <= -0.05 &&
-                      ctx.ind.rsi < 51.0 && ctx.ind.rsi > 26.0 &&
+      bool bearMom = (ctx.mtf.higherBias != SIGNAL_BUY &&
+                      ctx.ind.adxMain >= 18.0 &&
+                      ctx.ind.macdHist < 0.0 &&
+                      ctx.ind.macdHist <= ctx.ind.prevMacdHist &&
+                      (ctx.ind.priceDisplacementAtr <= -0.60 || (ctx.ind.roc <= -m_minRocAbs && ctx.ind.priceDisplacementAtr < -0.30)) &&
+                      ctx.ind.directionalPersist <= -0.15 &&
+                      ctx.ind.rsi <= 50.0 && ctx.ind.rsi >= 28.0 &&
                       ctx.ind.adxMinusDI > ctx.ind.adxPlusDI &&
-                      ctx.ind.emaFast < ctx.ind.emaMedium &&
+                      ctx.ind.emaFast < ctx.ind.emaMedium && ctx.ind.emaMedium < ctx.ind.emaSlow &&
                       ctx.candle.bias != SIGNAL_BUY &&
-                      bearTickOk && ctx.market.close < ctx.ind.emaFast);
+                      bearTickOk && ctx.market.close < ctx.market.open && ctx.market.close < ctx.ind.emaFast);
 
       if(bullMom)
       {
-         double slDist = ComputeStructuralSLDist(ctx, SIGNAL_BUY, m_slAtrMult, m_slAtrMult * 1.40);
-         double tpMultEff = (ctx.mtf.alignedBullish && ctx.ind.adxMain >= 22.0) ? (m_tpAtrMult * 1.25) : m_tpAtrMult;
-         double tpDist = MathMax(slDist * 1.35, ctx.ind.atr * tpMultEff);
-         PopulateCommonSignal(outSignal, ctx, SIGNAL_BUY, slDist, tpDist, 0.78,
-                              "Bullish accelerating momentum with directional persistence (non-overextended)",
-                              StringFormat("ROC=%.3f%% Accel=%.3f Persist=%.2f Ext=%.2fATR", ctx.ind.roc, ctx.ind.momentumAccel, ctx.ind.directionalPersist, ctx.ind.emaDistanceAtr),
+         double slDist = ComputeStructuralSLDist(ctx, SIGNAL_BUY, effSlMult, effSlMult * 1.40);
+         double tpMultEff = (ctx.mtf.alignedBullish && ctx.ind.adxMain >= 22.0) ? (effTpMult * 1.25) : effTpMult;
+         double tpDist = MathMax(slDist * 1.50, ctx.ind.atr * tpMultEff);
+         PopulateCommonSignal(outSignal, ctx, SIGNAL_BUY, slDist, tpDist, 0.80,
+                              "Bullish accelerating momentum with full EMA & HTF alignment (non-overextended)",
+                              StringFormat("Disp=%.2fATR ROC=%.3f%% Persist=%.2f Ext=%.2fATR", ctx.ind.priceDisplacementAtr, ctx.ind.roc, ctx.ind.directionalPersist, ctx.ind.emaDistanceAtr),
                               ctx.structure.summary, ctx.candle.name,
                               ctx.mtf.hasStrongConflict ? ctx.mtf.conflictReason : "None");
          return true;
@@ -105,12 +111,12 @@ public:
 
       if(bearMom)
       {
-         double slDist = ComputeStructuralSLDist(ctx, SIGNAL_SELL, m_slAtrMult, m_slAtrMult * 1.40);
-         double tpMultEff = (ctx.mtf.alignedBearish && ctx.ind.adxMain >= 22.0) ? (m_tpAtrMult * 1.25) : m_tpAtrMult;
-         double tpDist = MathMax(slDist * 1.35, ctx.ind.atr * tpMultEff);
-         PopulateCommonSignal(outSignal, ctx, SIGNAL_SELL, slDist, tpDist, 0.78,
-                              "Bearish accelerating momentum with directional persistence (non-overextended)",
-                              StringFormat("ROC=%.3f%% Accel=%.3f Persist=%.2f Ext=%.2fATR", ctx.ind.roc, ctx.ind.momentumAccel, ctx.ind.directionalPersist, ctx.ind.emaDistanceAtr),
+         double slDist = ComputeStructuralSLDist(ctx, SIGNAL_SELL, effSlMult, effSlMult * 1.40);
+         double tpMultEff = (ctx.mtf.alignedBearish && ctx.ind.adxMain >= 22.0) ? (effTpMult * 1.25) : effTpMult;
+         double tpDist = MathMax(slDist * 1.50, ctx.ind.atr * tpMultEff);
+         PopulateCommonSignal(outSignal, ctx, SIGNAL_SELL, slDist, tpDist, 0.80,
+                              "Bearish accelerating momentum with full EMA & HTF alignment (non-overextended)",
+                              StringFormat("Disp=%.2fATR ROC=%.3f%% Persist=%.2f Ext=%.2fATR", ctx.ind.priceDisplacementAtr, ctx.ind.roc, ctx.ind.directionalPersist, ctx.ind.emaDistanceAtr),
                               ctx.structure.summary, ctx.candle.name,
                               ctx.mtf.hasStrongConflict ? ctx.mtf.conflictReason : "None");
          return true;

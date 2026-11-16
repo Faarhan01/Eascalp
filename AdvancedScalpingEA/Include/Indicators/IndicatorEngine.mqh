@@ -104,6 +104,7 @@ private:
 
       double sumPV = 0.0, sumV = 0.0;
       int total = ArraySize(rates);
+      int sessionBars = 0;
       for(int i = 0; i < total; i++)
       {
          MqlDateTime dt;
@@ -115,7 +116,24 @@ private:
          double typical = (rates[i].high + rates[i].low + rates[i].close) / 3.0;
          sumPV += typical * vol;
          sumV  += vol;
+         sessionBars++;
       }
+
+      // Rolling 48-bar fallback right after midnight UTC on 24/7 synthetics (e.g. Step Index / Crypto)
+      if(sessionBars < 8)
+      {
+         sumPV = 0.0; sumV = 0.0;
+         int rollN = MathMin(48, total);
+         for(int i = 0; i < rollN; i++)
+         {
+            double vol = hasRealVol && rates[i].real_volume > 0 ? (double)rates[i].real_volume : (double)rates[i].tick_volume;
+            if(vol <= 0.0) continue;
+            double typical = (rates[i].high + rates[i].low + rates[i].close) / 3.0;
+            sumPV += typical * vol;
+            sumV  += vol;
+         }
+      }
+
       if(sumV <= 0.0) return false;
       outVwap = sumPV / sumV;
       return true;

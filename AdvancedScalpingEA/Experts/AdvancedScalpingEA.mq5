@@ -5,8 +5,8 @@
 //+------------------------------------------------------------------+
 #property copyright "AdvancedScalpingEA Quantitative Systems"
 #property link      "https://www.mql5.com"
-#property version   "2.20"
-#property description "v2.2.0 Multi-Symbol Scalping EA: Universal Symbol Auto-Profiler, Multi-Strategy Consensus, Structural SL/TP, Progressive Chandelier Trailing, 17 Regimes, Portfolio Risk & Read-Only Dashboard."
+#property version   "2.30"
+#property description "v2.3.0 Self-Tuning Multi-Symbol Scalping EA: Zero-Preset Auto-Adaptive Asset Profiles (Forex Majors/Crosses/Exotics, Step Index, Synthetics, Metals, Indices, Crypto), HTF-Aligned Strategies, >=1.0R BE & Chandelier Trailing, Read-Only Dashboard."
 
 #include "../Include/Core/Types.mqh"
 #include "../Include/Core/EAController.mqh"
@@ -18,10 +18,11 @@ input ENUM_EA_OPERATING_MODE InpOperatingMode    = EA_MODE_LIVE_TRADING; // Oper
 input bool   InpAllowLiveTrading                 = true;                  // Allow Live Real-Account Orders
 input bool   InpConfirmLiveRiskAcknowledgement     = true;                  // Confirm Real-Account Risk Acknowledgement
 input long   InpMagicNumber                      = 510299;                // Unique EA Magic Number
-input string InpConfigLabel                      = "ReadyToTrade_v2.2";   // Configuration Label for Logs
+input string InpConfigLabel                      = "AutoAdaptive_v2.3";   // Configuration Label for Logs
 
 //--- 2. Symbol Settings
 input group "=== 2. Symbol Settings ==="
+input bool   InpAutoAdaptBySymbol                = true;                  // Auto-Adapt Parameters by Symbol / Asset Class (No Presets Needed)
 input string InpSymbolOverride                   = "";                    // Primary Symbol Override (Empty = Chart Symbol)
 input string InpMultiSymbolList                  = "";                    // Additional Symbols (Comma-Separated, Max 8 Total)
 input double InpFallbackCommissionPerLot         = 0.0;                   // Fallback Round-Turn Commission/Lot (If Broker History Empty)
@@ -61,8 +62,8 @@ input group "=== 6. Market Structure ==="
 input int    InpSwingStrength                    = 3;                     // Swing Pivot Strength (Bars Left/Right)
 input int    InpStructureLookback                = 120;                   // Structure Lookback (Closed Bars)
 input double InpZoneAtrMult                      = 0.35;                  // S/R Zone Tolerance (x ATR)
-input double InpAdxStrongThreshold               = 28.0;                  // Strong Trend ADX Threshold
-input double InpAdxWeakThreshold                 = 18.0;                  // Weak Trend ADX Threshold
+input double InpAdxStrongThreshold               = 26.0;                  // Strong Trend ADX Threshold
+input double InpAdxWeakThreshold                 = 17.0;                  // Weak Trend ADX Threshold
 
 //--- 7. Candlestick Recognition
 input group "=== 7. Candlestick Recognition ==="
@@ -83,15 +84,15 @@ input bool   InpEnableReversalScalp              = true;                  // Str
 input bool   InpEnableRangeScalp                 = true;                  // Strategy 5: Range Scalping
 input bool   InpEnableVolExpansion               = true;                  // Strategy 6: Volatility Expansion
 input bool   InpEnableMicroMomentum              = true;                  // Strategy 7: Micro-Momentum
-input double InpDefaultSlAtrMult                 = 1.5;                   // Default Stop-Loss (x ATR)
-input double InpDefaultTpAtrMult                 = 2.2;                   // Default Take-Profit (x ATR)
-input bool   InpEvaluateOnNewBarOnly             = false;                 // Evaluate Entries Only on New Closed Bar
+input double InpDefaultSlAtrMult                 = 1.60;                  // Default Stop-Loss (x ATR)
+input double InpDefaultTpAtrMult                 = 2.80;                  // Default Take-Profit (x ATR)
+input bool   InpEvaluateOnNewBarOnly             = true;                  // Evaluate Entries Only on New Closed Bar
 
 //--- 10. Signal Scoring & Expectancy
 input group "=== 10. Signal Scoring & Expectancy ==="
-input double InpMinSignalScore                   = 48.0;                  // Minimum Signal Score (0 - 100)
-input double InpMinRewardRiskRatio               = 1.05;                  // Minimum Structural Reward:Risk Ratio
-input double InpMinTpToCostRatio                 = 1.5;                   // Minimum TP Value / Total Execution Cost
+input double InpMinSignalScore                   = 60.0;                  // Minimum Signal Score (0 - 100)
+input double InpMinRewardRiskRatio               = 1.30;                  // Minimum Structural Reward:Risk Ratio
+input double InpMinTpToCostRatio                 = 2.20;                  // Minimum TP Value / Total Execution Cost
 input double InpEstimatedSlippagePoints          = 2.0;                   // Baseline Pre-Fill Slippage Floor (Points)
 input bool   InpRequireViableExpectancy          = true;                  // Require Economically Viable Expectancy
 
@@ -99,11 +100,11 @@ input bool   InpRequireViableExpectancy          = true;                  // Req
 input group "=== 11. Trade Validation ==="
 input double InpMaxSpreadPoints                  = 0.0;                   // Maximum Allowed Spread (Points, 0 = Auto-Adaptive)
 input double InpMaxSpreadRatio                   = 2.50;                  // Maximum Spread Expansion Ratio
-input double InpMaxSpreadAtrPct                  = 32.0;                  // Maximum Spread as % of ATR
+input double InpMaxSpreadAtrPct                  = 28.0;                  // Maximum Spread as % of ATR
 input double InpMaxVolatilityRatio               = 3.20;                  // Maximum ATR Volatility Ratio
 input double InpMinVolatilityRatio               = 0.30;                  // Minimum ATR Volatility Ratio
 input int    InpMinRequiredBars                  = 50;                    // Minimum Historical Bars Required
-input bool   InpRequireMtfNoStrongConflict       = false;                 // Block Trades on Strong MTF Conflict
+input bool   InpRequireMtfNoStrongConflict       = true;                  // Block Trades on Strong MTF Conflict
 
 //--- 12. Risk Management
 input group "=== 12. Risk Management ==="
@@ -128,27 +129,27 @@ input bool   InpEmergencyStopNewEntries          = false;                 // Eme
 //--- 13. Position Management
 input group "=== 13. Position Management ==="
 input bool   InpEnableBreakEven                  = true;                  // Enable Cost-Covering Break-Even Protection
-input double InpBreakEvenTriggerAtr              = 1.0;                   // Break-Even Trigger (x ATR)
+input double InpBreakEvenTriggerAtr              = 1.45;                  // Break-Even Trigger (x ATR)
 input double InpBreakEvenLockAtr                 = 0.15;                  // Break-Even Lock Offset (x ATR)
 input bool   InpEnablePartialClose               = true;                  // Enable Partial Take-Profit Scaling
-input double InpPartialCloseTriggerAtr           = 1.25;                  // Partial Close Profit Trigger (x ATR)
-input double InpPartialCloseFraction             = 0.50;                  // Partial Close Volume Fraction (0.20 - 0.75)
+input double InpPartialCloseTriggerAtr           = 1.90;                  // Partial Close Profit Trigger (x ATR)
+input double InpPartialCloseFraction             = 0.40;                  // Partial Close Volume Fraction (0.20 - 0.75)
 input bool   InpEnableTrailingStop               = true;                  // Enable ATR Trailing Stop
 input bool   InpUseProgressiveTrail              = true;                  // Compress Trail Multiplier in Extended Profit
 input bool   InpUseChandelierTrail               = true;                  // Anchor Trail from Peak Favorable Excursion
-input double InpTrailingStartAtr                 = 1.4;                   // Trailing Start Profit (x ATR)
-input double InpTrailingStepAtr                  = 0.9;                   // Trailing Stop Distance (x ATR)
+input double InpTrailingStartAtr                 = 2.00;                  // Trailing Start Profit (x ATR)
+input double InpTrailingStepAtr                  = 1.00;                  // Trailing Stop Distance (x ATR)
 input bool   InpEnableStrategyExit               = true;                  // Enable Strategy-Specific Early Exit Hook
 input bool   InpEnableStructureExit              = true;                  // Exit on Momentum-Confirmed CHoCH Reversal
-input bool   InpEnableMomentumExit               = true;                  // Exit on Momentum Deterioration
+input bool   InpEnableMomentumExit               = false;                 // Exit on Sustained Momentum Deterioration
 input bool   InpEnableMaxHoldExit                = true;                  // Exit at Max Holding Duration
-input int    InpMaxHoldingMinutes                = 120;                   // Max Holding Duration (Minutes)
+input int    InpMaxHoldingMinutes                = 180;                   // Max Holding Duration (Minutes)
 input bool   InpCloseBeforeWeekend               = false;                 // Close Open Non-24x7 Positions Late Friday
 input int    InpFridayCloseHour                  = 21;                    // Friday Pre-Weekend Close Hour (Server Time)
 
 //--- 14. Trading Filters
 input group "=== 14. Trading Filters ==="
-input int    InpLossCooldownBars                 = 2;                     // Per-Symbol Cooldown Bars After Loss (0 = Off)
+input int    InpLossCooldownBars                 = 3;                     // Per-Symbol Cooldown Bars After Loss (0 = Off)
 input bool   InpEnableSessionFilter              = false;                 // Restrict to Configured Session Hours
 input int    InpSessionStartHour                 = 7;                     // Session Start Hour (Server Time)
 input int    InpSessionEndHour                   = 21;                    // Session End Hour (Server Time)
@@ -250,6 +251,7 @@ int OnInit()
    cfg.confirmLiveRiskAck  = InpConfirmLiveRiskAcknowledgement;
    cfg.magicNumber         = InpMagicNumber;
    cfg.configLabel         = InpConfigLabel;
+   cfg.autoAdaptBySymbol   = InpAutoAdaptBySymbol;
    cfg.symbolOverride      = InpSymbolOverride;
    cfg.multiSymbolList     = InpMultiSymbolList;
    cfg.fallbackCommPerLot  = InpFallbackCommissionPerLot;
