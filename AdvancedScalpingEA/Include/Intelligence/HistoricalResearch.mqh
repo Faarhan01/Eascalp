@@ -130,7 +130,7 @@ public:
          return true;
       }
 
-      if(ArraySize(m_mcSamples) < iters)
+      if(ArraySize(m_mcSamples) != iters)
          ArrayResize(m_mcSamples, iters);
       if(ArraySize(m_mcShuffled) < m_tradeCount)
          ArrayResize(m_mcShuffled, m_tradeCount);
@@ -161,7 +161,7 @@ public:
          m_mcSamples[it] = maxDD;
       }
 
-      ArraySort(m_mcSamples, 0, iters);
+      ArraySort(m_mcSamples);
       m_cachedMcMedDD = m_mcSamples[iters / 2];
       int p95Idx = (int)MathMin(iters - 1, MathFloor(0.95 * iters));
       m_cachedMcP95DD = m_mcSamples[p95Idx];
