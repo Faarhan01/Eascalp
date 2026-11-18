@@ -1,7 +1,7 @@
 //+------------------------------------------------------------------+
 //|                                              IndicatorEngine.mqh |
 //|                        Advanced Multi-Market MT5 Scalping EA     |
-//|                        v2.0.0 Cached Volatility & Momentum Suite |
+//|                        v2.9.0 Cached Volatility & Momentum Suite |
 //+------------------------------------------------------------------+
 #ifndef __ASEA_INDICATORS_INDICATORENGINE_MQH__
 #define __ASEA_INDICATORS_INDICATORENGINE_MQH__
@@ -85,7 +85,7 @@ private:
       outVal = 0.0;
       if(handle == INVALID_HANDLE) return false;
       if(BarsCalculated(handle) <= shift + 2) return false;
-      double buf[1];
+      double buf[];
       if(CopyBuffer(handle, bufferNum, shift, 1, buf) != 1) return false;
       if(!MathIsValidNumber(buf[0]) || buf[0] == EMPTY_VALUE) return false;
       outVal = buf[0];
@@ -216,11 +216,11 @@ public:
 
    bool Update(const CMarketData &data, const bool hasRealVolume)
    {
-      SMarketSnapshot snap = data.GetSnapshot();
-      if(!snap.dataReady) return false;
+      if(!data.IsDataReady()) return false;
+      datetime barT = data.GetBarTime();
 
       // Closed-bar caching: skip expensive CopyBuffer calls if closed bar unchanged
-      if(snap.barTime == m_lastUpdatedBar && m_values.isReady)
+      if(barT == m_lastUpdatedBar && m_values.isReady)
          return true;
 
       m_values.Reset();
@@ -342,7 +342,23 @@ public:
             m_values.emaDistanceAtr       = (rates[0].close - m_values.emaMedium) / m_values.atr;
          }
 
-         // Objective 12-bar RSI divergence check
+         // Relative Volume (RVOL): closed bar [0] vs 20-bar closed baseline average
+         int volBars = MathMin(21, ArraySize(rates));
+         if(volBars >= 6)
+         {
+            double curVol = (hasRealVolume && rates[0].real_volume > 0) ? (double)rates[0].real_volume : (double)rates[0].tick_volume;
+            double sumVol = 0.0;
+            int cntVol = 0;
+            for(int v = 1; v < volBars; v++)
+            {
+               double bv = (hasRealVolume && rates[v].real_volume > 0) ? (double)rates[v].real_volume : (double)rates[v].tick_volume;
+               if(bv > 0.0) { sumVol += bv; cntVol++; }
+            }
+            if(cntVol >= 5 && sumVol > 0.0 && curVol > 0.0)
+               m_values.relativeVolume = MathMax(0.10, MathMin(6.0, curVol / (sumVol / (double)cntVol)));
+         }
+
+         // Objective 12-bar RSI divergence check requiring genuine wave separation in bars [2..5]
          double rsiBuf[];
          ArraySetAsSeries(rsiBuf, true);
          if(CopyBuffer(m_hRsi, 0, shift, 16, rsiBuf) == 16)
@@ -355,7 +371,11 @@ public:
             {
                if(rates[k].low < minLowOld) { minLowOld = rates[k].low; minRsiOld = rsiBuf[k]; }
             }
-            m_values.bullDivergence = (minLowNow < minLowOld && minRsiNow > minRsiOld + 2.5 && m_values.rsi < 45.0);
+            double midMaxRsi = rsiBuf[2];
+            for(int k = 3; k <= 5; k++)
+               if(rsiBuf[k] > midMaxRsi) midMaxRsi = rsiBuf[k];
+            bool bullWaveSep = (midMaxRsi >= minRsiOld + 3.5 && midMaxRsi >= minRsiNow + 2.0);
+            m_values.bullDivergence = (minLowNow < minLowOld && minRsiNow > minRsiOld + 2.5 && bullWaveSep && m_values.rsi < 45.0);
 
             double maxHighNow = MathMax(rates[0].high, rates[1].high);
             double maxHighOld = rates[6].high;
@@ -365,7 +385,11 @@ public:
             {
                if(rates[k].high > maxHighOld) { maxHighOld = rates[k].high; maxRsiOld = rsiBuf[k]; }
             }
-            m_values.bearDivergence = (maxHighNow > maxHighOld && maxRsiNow < maxRsiOld - 2.5 && m_values.rsi > 55.0);
+            double midMinRsi = rsiBuf[2];
+            for(int k = 3; k <= 5; k++)
+               if(rsiBuf[k] < midMinRsi) midMinRsi = rsiBuf[k];
+            bool bearWaveSep = (midMinRsi <= maxRsiOld - 3.5 && midMinRsi <= maxRsiNow - 2.0);
+            m_values.bearDivergence = (maxHighNow > maxHighOld && maxRsiNow < maxRsiOld - 2.5 && bearWaveSep && m_values.rsi > 55.0);
          }
 
          // 20-bar prior Donchian channel on completed bars [1..20] (zero look-ahead against bar [0])
@@ -385,18 +409,19 @@ public:
             m_values.donchianMid  = (dcH + dcL) * 0.5;
          }
 
-         // Momentum exhaustion: extended >2.0 ATR from EMA21 while MACD histogram shrinks, or aligned overextension divergence
+         // Momentum exhaustion: true overextension (>2.15 ATR + fading MACD + extreme RSI) or active divergence
          bool histFading = (MathAbs(m_values.macdHist) < MathAbs(m_values.prevMacdHist));
-         m_values.momentumExhaustion = ((MathAbs(m_values.emaDistanceAtr) > 2.0 && histFading) ||
-                                        (m_values.bearDivergence && m_values.emaDistanceAtr > 0.6) ||
-                                        (m_values.bullDivergence && m_values.emaDistanceAtr < -0.6));
+         m_values.momentumExhaustion = ((MathAbs(m_values.emaDistanceAtr) > 2.15 && histFading &&
+                                         (m_values.rsi >= 72.0 || m_values.rsi <= 28.0)) ||
+                                        (m_values.bearDivergence && m_values.emaDistanceAtr > 0.85) ||
+                                        (m_values.bullDivergence && m_values.emaDistanceAtr < -0.85));
       }
 
       if(m_cfg.enableVWAP)
          m_values.vwapAvailable = ComputeSessionVWAP(data, hasRealVolume, m_values.vwap);
 
       m_values.isReady = true;
-      m_lastUpdatedBar = snap.barTime;
+      m_lastUpdatedBar = barT;
       return true;
    }
 

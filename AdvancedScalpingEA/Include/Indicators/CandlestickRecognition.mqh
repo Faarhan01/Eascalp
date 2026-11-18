@@ -1,7 +1,7 @@
 //+------------------------------------------------------------------+
 //|                                       CandlestickRecognition.mqh |
 //|                        Advanced Multi-Market MT5 Scalping EA     |
-//|                        v2.0.0 Context-Aware Price Action Engine  |
+//|                        v2.9.0 Context-Aware Price Action Engine  |
 //+------------------------------------------------------------------+
 #ifndef __ASEA_INDICATORS_CANDLESTICKRECOGNITION_MQH__
 #define __ASEA_INDICATORS_CANDLESTICKRECOGNITION_MQH__
@@ -34,8 +34,9 @@ public:
 
    bool Analyze(const CMarketData &data, const ENUM_TIMEFRAMES tf, const SIndicatorValues &ind, const SStructureState &structure)
    {
-      SMarketSnapshot snap = data.GetSnapshot();
-      if(snap.dataReady && snap.barTime == m_lastAnalyzedBar)
+      if(!data.IsDataReady()) return false;
+      datetime barT = data.GetBarTime();
+      if(barT == m_lastAnalyzedBar)
          return true;
 
       m_signal.Reset();
@@ -181,7 +182,7 @@ public:
          }
       }
 
-      m_lastAnalyzedBar = snap.barTime;
+      m_lastAnalyzedBar = barT;
       return true;
    }
 

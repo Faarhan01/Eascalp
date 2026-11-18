@@ -1,7 +1,7 @@
 //+------------------------------------------------------------------+
 //|                                             MomentumScalping.mqh |
 //|                        Advanced Multi-Market MT5 Scalping EA     |
-//|                        v2.0.0 Anti-Chase Momentum Scalping       |
+//|                        v2.9.0 Volatility-Scaled Momentum Scalp  |
 //+------------------------------------------------------------------+
 #ifndef __ASEA_STRATEGIES_MOMENTUMSCALPING_MQH__
 #define __ASEA_STRATEGIES_MOMENTUMSCALPING_MQH__
@@ -18,7 +18,7 @@ public:
    CStrategyMomentumScalping() : CStrategyBase(STRAT_MOMENTUM_SCALPING, "Momentum Scalping")
    {
       m_minRocAbs = 0.010;
-      m_maxEmaExtAtr = 2.0;
+      m_maxEmaExtAtr = 1.85;
    }
 
    void Configure(const bool enabled, const double slMult, const double tpMult, const int minSample, const double minRocAbs)
@@ -71,30 +71,51 @@ public:
       bool bearTickOk = (!ctx.ticks.isReady || ctx.ticks.microTrendBias < -0.05);
       double effSlMult = GetEffectiveSlMult(ctx, 1.0);
       double effTpMult = GetEffectiveTpMult(ctx, 1.0);
+      double barRange = MathMax(ctx.market.high - ctx.market.low, MathMax(ctx.symbolProfile.point, 0.0000001));
+      double body = MathAbs(ctx.market.close - ctx.market.open);
 
-      bool bullMom = (ctx.mtf.higherBias != SIGNAL_SELL &&
-                      ctx.ind.adxMain >= 18.0 &&
+      bool bullMtfTailwind = (ctx.mtf.higherBias == SIGNAL_BUY) || (ctx.mtf.higherBias == SIGNAL_NONE && ctx.mtf.intermediateBias == SIGNAL_BUY);
+      bool bearMtfTailwind = (ctx.mtf.higherBias == SIGNAL_SELL) || (ctx.mtf.higherBias == SIGNAL_NONE && ctx.mtf.intermediateBias == SIGNAL_SELL);
+      bool bullWallClear = !ctx.structure.isReady || !(ctx.structure.nearestResistance > ctx.market.close &&
+                                                      (ctx.structure.nearestResistance - ctx.market.close) < ctx.ind.atr * 0.65 &&
+                                                      ctx.structure.resistanceRejectCount >= 2);
+      bool bearWallClear = !ctx.structure.isReady || !(ctx.structure.nearestSupport > 0.0 &&
+                                                      ctx.structure.nearestSupport < ctx.market.close &&
+                                                      (ctx.market.close - ctx.structure.nearestSupport) < ctx.ind.atr * 0.65 &&
+                                                      ctx.structure.supportRejectCount >= 2);
+      bool bullCandleConv = (ctx.market.close > ctx.market.open) && (body >= barRange * 0.40) && ((ctx.market.close - ctx.market.low) >= barRange * 0.60);
+      bool bearCandleConv = (ctx.market.close < ctx.market.open) && (body >= barRange * 0.40) && ((ctx.market.high - ctx.market.close) >= barRange * 0.60);
+
+      double atrPct = (ctx.market.close > 0.0) ? ((ctx.ind.atr / ctx.market.close) * 100.0) : 0.0;
+      double effMinRoc = MathMax(m_minRocAbs, atrPct * 0.40);
+
+      bool bullMom = (bullMtfTailwind && bullWallClear &&
+                      ctx.ind.adxMain >= 19.5 &&
                       ctx.ind.macdHist > 0.0 &&
-                      ctx.ind.macdHist >= ctx.ind.prevMacdHist &&
-                      (ctx.ind.priceDisplacementAtr >= 0.60 || (ctx.ind.roc >= m_minRocAbs && ctx.ind.priceDisplacementAtr > 0.30)) &&
-                      ctx.ind.directionalPersist >= 0.15 &&
-                      ctx.ind.rsi >= 50.0 && ctx.ind.rsi <= 72.0 &&
+                      ctx.ind.macdHist > ctx.ind.prevMacdHist &&
+                      ctx.ind.roc >= effMinRoc &&
+                      ctx.ind.priceDisplacementAtr >= 0.45 &&
+                      ctx.ind.directionalPersist >= 0.20 &&
+                      ctx.ind.rsi >= 50.0 && ctx.ind.rsi <= 71.0 &&
                       ctx.ind.adxPlusDI > ctx.ind.adxMinusDI &&
                       ctx.ind.emaFast > ctx.ind.emaMedium && ctx.ind.emaMedium > ctx.ind.emaSlow &&
+                      (!ctx.ind.vwapAvailable || ctx.market.close >= ctx.ind.vwap) &&
                       ctx.candle.bias != SIGNAL_SELL &&
-                      bullTickOk && ctx.market.close > ctx.market.open && ctx.market.close > ctx.ind.emaFast);
+                      bullTickOk && bullCandleConv && ctx.market.close > ctx.ind.emaFast);
 
-      bool bearMom = (ctx.mtf.higherBias != SIGNAL_BUY &&
-                      ctx.ind.adxMain >= 18.0 &&
+      bool bearMom = (bearMtfTailwind && bearWallClear &&
+                      ctx.ind.adxMain >= 19.5 &&
                       ctx.ind.macdHist < 0.0 &&
-                      ctx.ind.macdHist <= ctx.ind.prevMacdHist &&
-                      (ctx.ind.priceDisplacementAtr <= -0.60 || (ctx.ind.roc <= -m_minRocAbs && ctx.ind.priceDisplacementAtr < -0.30)) &&
-                      ctx.ind.directionalPersist <= -0.15 &&
-                      ctx.ind.rsi <= 50.0 && ctx.ind.rsi >= 28.0 &&
+                      ctx.ind.macdHist < ctx.ind.prevMacdHist &&
+                      ctx.ind.roc <= -effMinRoc &&
+                      ctx.ind.priceDisplacementAtr <= -0.45 &&
+                      ctx.ind.directionalPersist <= -0.20 &&
+                      ctx.ind.rsi <= 50.0 && ctx.ind.rsi >= 29.0 &&
                       ctx.ind.adxMinusDI > ctx.ind.adxPlusDI &&
                       ctx.ind.emaFast < ctx.ind.emaMedium && ctx.ind.emaMedium < ctx.ind.emaSlow &&
+                      (!ctx.ind.vwapAvailable || ctx.market.close <= ctx.ind.vwap) &&
                       ctx.candle.bias != SIGNAL_BUY &&
-                      bearTickOk && ctx.market.close < ctx.market.open && ctx.market.close < ctx.ind.emaFast);
+                      bearTickOk && bearCandleConv && ctx.market.close < ctx.ind.emaFast);
 
       if(bullMom)
       {

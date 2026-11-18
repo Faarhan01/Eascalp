@@ -1,7 +1,7 @@
 //+------------------------------------------------------------------+
 //|                                             ExpectancyEngine.mqh |
 //|                        Advanced Multi-Market MT5 Scalping EA     |
-//|                        v2.0.0 Cost-Aware Expectancy Engine       |
+//|                        v2.9.0 Cost-Aware Expectancy Engine       |
 //+------------------------------------------------------------------+
 #ifndef __ASEA_TRADING_EXPECTANCYENGINE_MQH__
 #define __ASEA_TRADING_EXPECTANCYENGINE_MQH__
@@ -106,10 +106,15 @@ public:
          est.netExpectancyMoney   = expR * riskMoney;
          est.grossExpectancyMoney = est.netExpectancyMoney + totalCost;
 
-         bool histCleared = (!m_cfg.requireNonNegativeHistoricalExp) || (expR >= -0.05);
+         int rIdx = (int)sig.regime;
+         bool positiveRecent = (stratStats.recentNetProfit > 0.0 && stratStats.recentWinRatePct >= 42.0);
+         bool positiveRegime = (rIdx >= 0 && rIdx <= EA_MAX_REGIMES && stratStats.regimeTrades[rIdx] >= 4 && stratStats.regimeNetProfit[rIdx] > 0.0);
+         bool highConvRehab  = (expR >= -0.10 && sig.suitability == SUIT_SUITABLE && sig.compositeScore >= 68.0);
+         bool histCleared = (!m_cfg.requireNonNegativeHistoricalExp) || (expR >= 0.0) ||
+                            positiveRecent || positiveRegime || highConvRehab;
          est.economicallyViable = (costCleared && rrCleared && histCleared);
-         est.summary = StringFormat("R:R=%.2f | Cost=%.2f | ExpR=%.2f (n=%d)",
-                                    est.riskRewardRatio, est.estimatedCostMoney, expR, est.sampleSize);
+         est.summary = StringFormat("R:R=%.2f | Cost=%.2f | ExpR=%.2f RecPnL=%.2f (n=%d)",
+                                    est.riskRewardRatio, est.estimatedCostMoney, expR, stratStats.recentNetProfit, est.sampleSize);
       }
       else
       {

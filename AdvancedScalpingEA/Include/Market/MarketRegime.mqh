@@ -1,7 +1,7 @@
 //+------------------------------------------------------------------+
 //|                                                 MarketRegime.mqh |
 //|                        Advanced Multi-Market MT5 Scalping EA     |
-//|                        v2.0.0 17-State Regime & Transition Engine|
+//|                        v2.9.0 18-State Regime & Transition Engine|
 //+------------------------------------------------------------------+
 #ifndef __ASEA_MARKET_MARKETREGIME_MQH__
 #define __ASEA_MARKET_MARKETREGIME_MQH__
@@ -21,6 +21,8 @@ private:
    SRegimeState       m_barState;
    ENUM_MARKET_REGIME m_prevStableRegime;
    datetime           m_lastAnalyzedBar;
+   datetime           m_stateSyncedBar;
+   bool               m_unstableOverlayActive;
    double             m_cachedEffRatio;
 
    double ComputeEfficiencyRatio(const MqlRates &rates[], const int period) const
@@ -45,6 +47,8 @@ public:
       m_spreadUnstableRatio = 2.80;
       m_prevStableRegime    = REGIME_UNKNOWN;
       m_lastAnalyzedBar     = 0;
+      m_stateSyncedBar      = 0;
+      m_unstableOverlayActive = false;
       m_cachedEffRatio      = 0.0;
       m_state.Reset();
       m_barState.Reset();
@@ -63,15 +67,19 @@ public:
    bool Classify(const CMarketData &data, const ENUM_TIMEFRAMES tf, const SIndicatorValues &ind,
                  const SStructureState &structure, const STickMetrics &ticks, const double pipPoints = 1.0)
    {
-      SMarketSnapshot snap = data.GetSnapshot();
-      if(!snap.dataReady || !ind.isReady)
+      if(!data.IsDataReady() || !ind.isReady)
       {
          m_state.Reset();
+         m_stateSyncedBar = 0;
+         m_unstableOverlayActive = false;
          return false;
       }
 
-      if(snap.barTime != m_lastAnalyzedBar || m_barState.regime == REGIME_UNKNOWN)
+      datetime barT = data.GetBarTime();
+      bool barRecalc = (barT != m_lastAnalyzedBar || m_barState.regime == REGIME_UNKNOWN);
+      if(barRecalc)
       {
+         double closedClose = data.GetClosedClose();
          ENUM_MARKET_REGIME prevClosed = m_barState.regime;
          m_barState.Reset();
          m_barState.previousRegime = prevClosed;
@@ -79,7 +87,7 @@ public:
          MqlRates rates[];
          if(data.CopyAvailableClosedRates(tf, 16, 20, rates))
             m_cachedEffRatio = ComputeEfficiencyRatio(rates, 14);
-         m_lastAnalyzedBar = snap.barTime;
+         m_lastAnalyzedBar = barT;
 
          double effRatio = m_cachedEffRatio;
          double volRatio = ind.relativeAtr;
@@ -111,7 +119,7 @@ public:
             m_barState.regime = REGIME_POTENTIAL_REVERSAL;
             m_barState.confidence = 0.78;
          }
-         else if(ind.momentumExhaustion || (structure.trendExhaustion && MathAbs(ind.emaDistanceAtr) > 2.2))
+         else if(ind.momentumExhaustion || (structure.trendExhaustion && MathAbs(ind.emaDistanceAtr) > 2.35 && (ind.rsi >= 72.0 || ind.rsi <= 28.0)))
          {
             m_barState.regime = REGIME_TREND_EXHAUSTION;
             m_barState.isTrending = true; m_barState.confidence = 0.76;
@@ -129,20 +137,20 @@ public:
          }
          else
          {
-            bool bullStack = (ind.emaFast > ind.emaMedium && ind.emaMedium > ind.emaSlow && snap.close > ind.emaMedium);
-            bool bearStack = (ind.emaFast < ind.emaMedium && ind.emaMedium < ind.emaSlow && snap.close < ind.emaMedium);
+            bool bullStack = (ind.emaFast > ind.emaMedium && ind.emaMedium > ind.emaSlow && closedClose > ind.emaMedium);
+            bool bearStack = (ind.emaFast < ind.emaMedium && ind.emaMedium < ind.emaSlow && closedClose < ind.emaMedium);
 
             if(ind.adxMain >= m_adxStrongThreshold && effRatio >= 0.28)
             {
                if(bullStack && ind.adxPlusDI > ind.adxMinusDI && ind.directionalPersist >= 0.2)
                {
-                  m_barState.regime = (snap.close > ind.smaTrend && structure.hasHH && structure.hasHL)
+                  m_barState.regime = (closedClose > ind.smaTrend && structure.hasHH && structure.hasHL)
                                       ? REGIME_ESTABLISHED_BULL : REGIME_STRONG_BULL_TREND;
                   m_barState.isTrending = true; m_barState.confidence = 0.88;
                }
                else if(bearStack && ind.adxMinusDI > ind.adxPlusDI && ind.directionalPersist <= -0.2)
                {
-                  m_barState.regime = (snap.close < ind.smaTrend && structure.hasLH && structure.hasLL)
+                  m_barState.regime = (closedClose < ind.smaTrend && structure.hasLH && structure.hasLL)
                                       ? REGIME_ESTABLISHED_BEAR : REGIME_STRONG_BEAR_TREND;
                   m_barState.isTrending = true; m_barState.confidence = 0.88;
                }
@@ -201,22 +209,32 @@ public:
       }
 
       // Apply live spread-spike instability as a non-destructive overlay on top of the cached bar regime
-      m_state = m_barState;
       double minSpreadPts = MathMax(2.0, pipPoints * 1.0);
-      if((snap.spreadRatio >= m_spreadUnstableRatio && snap.spreadPoints > minSpreadPts) ||
-         (ticks.spreadSpikeDetected && snap.spreadRatio >= 2.40))
+      double curSpreadRatio = data.GetSpreadRatio();
+      double curSpreadPts   = data.GetSpreadPoints();
+      bool unstableNow = ((curSpreadRatio >= m_spreadUnstableRatio && curSpreadPts > minSpreadPts) ||
+                          (ticks.spreadSpikeDetected && curSpreadRatio >= 2.40));
+
+      if(barRecalc || m_stateSyncedBar != barT || unstableNow != m_unstableOverlayActive)
       {
-         m_state.regime     = REGIME_UNSTABLE;
-         m_state.isVolatile = true;
-         m_state.isUnstable = true;
-         m_state.confidence = 0.92;
-         m_state.label      = RegimeToString(REGIME_UNSTABLE);
+         m_state = m_barState;
+         if(unstableNow)
+         {
+            m_state.regime     = REGIME_UNSTABLE;
+            m_state.isVolatile = true;
+            m_state.isUnstable = true;
+            m_state.confidence = 0.92;
+            m_state.label      = RegimeToString(REGIME_UNSTABLE);
+         }
+         m_stateSyncedBar = barT;
+         m_unstableOverlayActive = unstableNow;
       }
 
       return true;
    }
 
-   SRegimeState GetState() const { return m_state; }
+   bool         IsUnstable() const { return m_state.isUnstable; }
+   SRegimeState GetState() const   { return m_state; }
 };
 
 #endif // __ASEA_MARKET_MARKETREGIME_MQH__

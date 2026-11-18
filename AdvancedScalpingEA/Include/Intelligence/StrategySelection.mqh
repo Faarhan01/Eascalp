@@ -1,7 +1,7 @@
 //+------------------------------------------------------------------+
 //|                                           StrategySelection.mqh  |
 //|                        Advanced Multi-Market MT5 Scalping EA     |
-//|                        v2.0.0 Context & Expectancy Selector      |
+//|                        v2.9.0 Context & Expectancy Selector      |
 //+------------------------------------------------------------------+
 #ifndef __ASEA_INTELLIGENCE_STRATEGYSELECTION_MQH__
 #define __ASEA_INTELLIGENCE_STRATEGYSELECTION_MQH__
@@ -51,12 +51,17 @@ public:
 
       int rIdx = (int)regime;
       double regimeAdj = 0.0;
-      if(rIdx >= 0 && rIdx <= EA_MAX_REGIMES && st.regimeTrades[rIdx] >= 8)
-         regimeAdj = (st.regimeNetProfit[rIdx] > 0.0) ? 8.0 : -12.0;
+      if(rIdx >= 0 && rIdx <= EA_MAX_REGIMES && st.regimeTrades[rIdx] >= 6)
+      {
+         double regWr = (double)st.regimeWins[rIdx] / (double)st.regimeTrades[rIdx];
+         regimeAdj = (st.regimeNetProfit[rIdx] > 0.0 && regWr >= 0.42) ? 10.0 : ((st.regimeNetProfit[rIdx] < 0.0) ? -12.0 : 0.0);
+      }
 
-      double recentPenalty = (st.recentNetProfit < 0.0 && st.recentWinRatePct < 34.0) ? 14.0 : 0.0;
+      double recentAdj = 0.0;
+      if(st.recentNetProfit < 0.0 && st.recentWinRatePct < 34.0) recentAdj = -14.0;
+      else if(st.recentNetProfit > 0.0 && st.recentWinRatePct >= 52.0) recentAdj = 6.0;
 
-      return base + pfTerm + evTerm + regimeAdj - ddPenalty - recentPenalty;
+      return base + pfTerm + evTerm + regimeAdj + recentAdj - ddPenalty;
    }
 
    // Sets outBestIdx = -1 when market is unfavorable or all suitable strategies show deterioration
@@ -113,17 +118,17 @@ public:
       if(!m_autoSelectBestOnly)
       {
          // Bench chronically losing strategies once early/statistical sample confirms deterioration
-         if(st.totalTrades >= MathMin(10, m_minSampleSize) &&
-            st.profitFactor < 0.78 &&
+         if(st.totalTrades >= MathMin(6, m_minSampleSize) &&
+            st.profitFactor < 0.75 &&
             st.expectedValue < 0.0 &&
             st.recentNetProfit < 0.0)
             return false;
 
          // Bench strategies proven unprofitable in this specific market regime
-         if(rIdx >= 0 && rIdx <= EA_MAX_REGIMES && st.regimeTrades[rIdx] >= 6)
+         if(rIdx >= 0 && rIdx <= EA_MAX_REGIMES && st.regimeTrades[rIdx] >= 5)
          {
             double regWr = (double)st.regimeWins[rIdx] / (double)st.regimeTrades[rIdx];
-            if(st.regimeNetProfit[rIdx] < 0.0 && regWr < 0.25 && idx != bestIdx)
+            if(st.regimeNetProfit[rIdx] < 0.0 && regWr < 0.32 && idx != bestIdx)
                return false;
          }
          return true;

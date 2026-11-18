@@ -1,7 +1,7 @@
 //+------------------------------------------------------------------+
 //|                                           SymbolIntelligence.mqh |
 //|                        Advanced Multi-Market MT5 Scalping EA     |
-//|                        v2.0.0 Dynamic Multi-Instrument Profiler  |
+//|                        v2.9.0 Dynamic Multi-Instrument Profiler  |
 //+------------------------------------------------------------------+
 #ifndef __ASEA_MARKET_SYMBOLINTELLIGENCE_MQH__
 #define __ASEA_MARKET_SYMBOLINTELLIGENCE_MQH__
@@ -12,12 +12,14 @@
 class CSymbolIntelligence
 {
 private:
-   SSymbolProfile m_profile;
-   CDiagnostics  *m_diag;
-   double         m_defaultCommissionPerLot;
-   bool           m_commissionChecked;
-   bool           m_commissionDiscovered;
-   datetime       m_lastCommCheck;
+   SSymbolProfile            m_profile;
+   ENUM_ASSET_CLASS_OVERRIDE m_assetOverride;
+   bool                      m_autoTuneFromHistory;
+   CDiagnostics             *m_diag;
+   double                    m_defaultCommissionPerLot;
+   bool                      m_commissionChecked;
+   bool                      m_commissionDiscovered;
+   datetime                  m_lastCommCheck;
 
    string ExtractCoreName(const string sym, string &outPrefix, string &outSuffix) const
    {
@@ -129,6 +131,16 @@ private:
               c == "CHF" || c == "CAD" || c == "AUD" || c == "NZD");
    }
 
+   bool IsKnownCurrencyCode(const string c) const
+   {
+      if(IsMajorCurrency(c)) return true;
+      return (c == "CNH" || c == "CNY" || c == "HKD" || c == "SGD" || c == "PLN" ||
+              c == "HUF" || c == "CZK" || c == "THB" || c == "INR" || c == "ZAR" ||
+              c == "MXN" || c == "TRY" || c == "NOK" || c == "SEK" || c == "DKK" ||
+              c == "KRW" || c == "TWD" || c == "BRL" || c == "ILS" || c == "SAR" ||
+              c == "AED" || c == "RON" || c == "RUB");
+   }
+
    ENUM_ASSET_CLASS ClassifySymbol(const string sym, const string core, const string baseCcy, const string profitCcy,
                                    bool &outStepIndex, bool &outSyntheticBurst) const
    {
@@ -146,7 +158,7 @@ private:
       string profU = profitCcy;
       StringToUpper(profU);
 
-      if(StringFind(fullU, "STEP") >= 0 || StringFind(pathU, "STEP") >= 0)
+      if(StringFind(fullU, "STEP") >= 0 || StringFind(fullU, "MULTISTEP") >= 0 || StringFind(pathU, "STEP") >= 0)
       {
          outStepIndex = true;
          return ASSET_SYNTHETIC;
@@ -156,6 +168,7 @@ private:
          StringFind(fullU, "BOOM") >= 0 || StringFind(fullU, "JUMP") >= 0 ||
          StringFind(fullU, "RANGE BREAK") >= 0 || StringFind(fullU, "DRIFT") >= 0 ||
          StringFind(fullU, "1HZ") >= 0 || StringFind(fullU, "DEX") >= 0 ||
+         StringFind(fullU, "HYBRID") >= 0 ||
          StringFind(fullU, "R_10") >= 0 || StringFind(fullU, "R_25") >= 0 ||
          StringFind(fullU, "R_50") >= 0 || StringFind(fullU, "R_75") >= 0 ||
          StringFind(fullU, "R_100") >= 0 || StringFind(fullU, "V10") >= 0 ||
@@ -174,15 +187,16 @@ private:
          StringFind(u, "XAG") >= 0 || StringFind(u, "SILVER") >= 0 ||
          StringFind(u, "XPT") >= 0 || StringFind(u, "XPD") >= 0 ||
          StringFind(u, "XCU") >= 0 || StringFind(u, "COPPER") >= 0 ||
-         StringFind(u, "PLATINUM") >= 0 || StringFind(u, "PALLADIUM") >= 0 ||
-         baseU == "XAU" || baseU == "XAG" || baseU == "XPT" || baseU == "XPD")
+         StringFind(u, "XAL") >= 0 || StringFind(u, "ALUM") >= 0 ||
+         StringFind(u, "PLAT") >= 0 || StringFind(u, "PALL") >= 0 ||
+         baseU == "XAU" || baseU == "XAG" || baseU == "XPT" || baseU == "XPD" || baseU == "XAL")
          return ASSET_METAL;
 
       if(StringFind(u, "WTI") >= 0 || StringFind(u, "BRENT") >= 0 || StringFind(u, "BRN") >= 0 ||
          StringFind(u, "USOIL") >= 0 || StringFind(u, "UKOIL") >= 0 ||
          StringFind(u, "CRUDE") >= 0 || StringFind(u, "CL_") >= 0 ||
          StringFind(u, "XTI") >= 0 || StringFind(u, "XBR") >= 0 || StringFind(u, "XNG") >= 0 ||
-         StringFind(u, "NGAS") >= 0 || StringFind(u, "NATGAS") >= 0)
+         StringFind(u, "NGAS") >= 0 || StringFind(u, "NATGAS") >= 0 || StringFind(u, "USO") >= 0)
          return ASSET_ENERGY;
 
       if(StringFind(u, "BTC") >= 0 || StringFind(u, "ETH") >= 0 ||
@@ -192,6 +206,12 @@ private:
          StringFind(u, "AVAX") >= 0 || StringFind(u, "DOT") >= 0 ||
          StringFind(u, "MATIC") >= 0 || StringFind(u, "LINK") >= 0 ||
          StringFind(u, "TON") >= 0 || StringFind(u, "TRX") >= 0 ||
+         StringFind(u, "SUI") >= 0 || StringFind(u, "PEPE") >= 0 ||
+         StringFind(u, "APT") >= 0 || StringFind(u, "NEAR") >= 0 ||
+         StringFind(u, "ARB") >= 0 || StringFind(u, "XLM") >= 0 ||
+         StringFind(u, "UNI") >= 0 || StringFind(u, "ETC") >= 0 ||
+         StringFind(u, "ATOM") >= 0 || StringFind(u, "FIL") >= 0 ||
+         StringFind(u, "SHIB") >= 0 ||
          StringFind(u, "BCH") >= 0 || baseU == "BTC" || baseU == "ETH" || baseU == "SOL")
          return ASSET_CRYPTO;
 
@@ -203,29 +223,36 @@ private:
          StringFind(u, "DE30") >= 0 || StringFind(u, "DE40") >= 0 ||
          StringFind(u, "GER30") >= 0 || StringFind(u, "GER40") >= 0 ||
          StringFind(u, "UK100") >= 0 || StringFind(u, "FTSE") >= 0 || StringFind(u, "JP225") >= 0 ||
-         StringFind(u, "NI225") >= 0 || StringFind(u, "NIKKEI") >= 0 || StringFind(u, "AUS200") >= 0 ||
+         StringFind(u, "NI225") >= 0 || StringFind(u, "NIKKEI") >= 0 ||
+         StringFind(u, "AUS200") >= 0 || StringFind(u, "ASX200") >= 0 ||
          StringFind(u, "FR40") >= 0 || StringFind(u, "CAC") >= 0 ||
          StringFind(u, "EU50") >= 0 || StringFind(u, "STOXX") >= 0 ||
-         StringFind(u, "HK50") >= 0 || StringFind(u, "HSI") >= 0 ||
-         StringFind(u, "ES35") >= 0 || StringFind(u, "IT40") >= 0 ||
-         StringFind(u, "CN50") >= 0 || StringFind(u, "US2000") >= 0 ||
-         StringFind(u, "RUT") >= 0 || StringFind(u, "VIX") >= 0 || StringFind(u, "DXY") >= 0)
+         StringFind(u, "HK50") >= 0 || StringFind(u, "HKG50") >= 0 || StringFind(u, "HSI") >= 0 ||
+         StringFind(u, "ES35") >= 0 || StringFind(u, "SPA35") >= 0 ||
+         StringFind(u, "IT40") >= 0 || StringFind(u, "MIB") >= 0 ||
+         StringFind(u, "NETH25") >= 0 || StringFind(u, "AEX") >= 0 ||
+         StringFind(u, "SWI20") >= 0 || StringFind(u, "SMI") >= 0 || StringFind(u, "CH20") >= 0 ||
+         StringFind(u, "CN50") >= 0 || StringFind(u, "NIFTY") >= 0 ||
+         StringFind(u, "US2000") >= 0 || StringFind(u, "RUSSELL") >= 0 ||
+         StringFind(u, "RUT") >= 0 || StringFind(u, "VIX") >= 0 || StringFind(u, "VOLX") >= 0 || StringFind(u, "DXY") >= 0)
          return ASSET_INDEX;
 
       if(StringLen(u) >= 6)
       {
          string b = StringSubstr(u, 0, 3);
          string q = StringSubstr(u, 3, 3);
-         bool baseMajor = IsMajorCurrency(b);
+         bool baseMajor  = IsMajorCurrency(b);
          bool quoteMajor = IsMajorCurrency(q);
+         bool baseKnown  = IsKnownCurrencyCode(b);
+         bool quoteKnown = IsKnownCurrencyCode(q);
          if(baseMajor && quoteMajor && StringLen(u) == 6)
             return IsKnownMajorPair(b, q) ? ASSET_FOREX_MAJOR : ASSET_FOREX_MINOR;
-         if((baseMajor || quoteMajor) && StringLen(u) == 6)
+         if((baseKnown && quoteKnown) && StringLen(u) == 6)
             return ASSET_FOREX_EXOTIC;
       }
 
-      // Inspect native MT5 symbol sector, group path, and calc mode for universal auto-recognition
       long sector = SymbolInfoInteger(sym, SYMBOL_SECTOR);
+      long calcMode = SymbolInfoInteger(sym, SYMBOL_TRADE_CALC_MODE);
       if(sector == SECTOR_CURRENCY_CRYPTO) return ASSET_CRYPTO;
       if(sector == SECTOR_INDEXES)         return ASSET_INDEX;
       if(sector == SECTOR_COMMODITIES)
@@ -234,7 +261,10 @@ private:
          if(StringFind(pathU, "ENERGY") >= 0 || StringFind(pathU, "OIL") >= 0 || StringFind(pathU, "GAS") >= 0) return ASSET_ENERGY;
       }
 
-      long calcMode = SymbolInfoInteger(sym, SYMBOL_TRADE_CALC_MODE);
+      if(calcMode == SYMBOL_CALC_MODE_EXCH_STOCKS || calcMode == SYMBOL_CALC_MODE_EXCH_STOCKS_MOEX ||
+         (sector >= SECTOR_BASIC_MATERIALS && sector <= SECTOR_UTILITIES))
+         return ASSET_EQUITY;
+
       if(calcMode == SYMBOL_CALC_MODE_CFDINDEX)
          return ASSET_INDEX;
       if(calcMode == SYMBOL_CALC_MODE_FOREX || calcMode == SYMBOL_CALC_MODE_FOREX_NO_LEVERAGE || sector == SECTOR_CURRENCY)
@@ -247,6 +277,9 @@ private:
          }
          return (baseU == "USD" || profU == "USD") ? ASSET_FOREX_MINOR : ASSET_FOREX_EXOTIC;
       }
+
+      if(StringFind(pathU, "STOCK") >= 0 || StringFind(pathU, "EQUIT") >= 0 || StringFind(pathU, "SHARE") >= 0)
+         return ASSET_EQUITY;
 
       return ASSET_CFD;
    }
@@ -261,20 +294,22 @@ private:
       return MathMax(point, tickSize);
    }
 
-   double ComputeBaseAutoSpreadFloorPts(const ENUM_ASSET_CLASS ac, const double point, const double pipSize) const
+   double ComputeBaseAutoSpreadFloorPts(const ENUM_ASSET_CLASS ac, const double point, const double pipSize, const double refPrice = 0.0) const
    {
-      double pipPts = (point > 0.0 && pipSize > 0.0) ? MathMax(1.0, pipSize / point) : 1.0;
+      double pipPts   = (point > 0.0 && pipSize > 0.0) ? MathMax(1.0, pipSize / point) : 1.0;
+      double pricePts = (point > 0.0 && refPrice > 0.0) ? (refPrice / point) : 0.0;
       switch(ac)
       {
          case ASSET_FOREX_MAJOR:  return MathMax(12.0, pipPts * 4.5);
          case ASSET_FOREX_MINOR:  return MathMax(20.0, pipPts * 7.5);
          case ASSET_FOREX_EXOTIC: return MathMax(80.0, pipPts * 25.0);
-         case ASSET_METAL:        return MathMax(50.0, pipPts * 18.0);
-         case ASSET_INDEX:        return MathMax(80.0, MathMin(1200.0, pipPts * 35.0));
-         case ASSET_ENERGY:       return MathMax(50.0, pipPts * 20.0);
-         case ASSET_CRYPTO:       return MathMax(120.0, MathMin(6000.0, pipPts * 50.0));
-         case ASSET_SYNTHETIC:    return MathMax(100.0, pipPts * 45.0);
-         default:                 return MathMax(60.0, pipPts * 25.0);
+         case ASSET_METAL:        return MathMax(55.0, MathMax(pipPts * 20.0, pricePts * 0.00025));
+         case ASSET_INDEX:        return MathMax(80.0, MathMax(pipPts * 35.0, pricePts * 0.00050));
+         case ASSET_ENERGY:       return MathMax(55.0, MathMax(pipPts * 20.0, pricePts * 0.00060));
+         case ASSET_CRYPTO:       return MathMax(150.0, MathMax(pipPts * 50.0, pricePts * 0.00140));
+         case ASSET_SYNTHETIC:    return MathMax(100.0, MathMax(pipPts * 45.0, pricePts * 0.00040));
+         case ASSET_EQUITY:       return MathMax(25.0, MathMax(pipPts * 12.0, pricePts * 0.00120));
+         default:                 return MathMax(60.0, MathMax(pipPts * 25.0, pricePts * 0.00060));
       }
    }
 
@@ -293,7 +328,7 @@ private:
 
    bool CheckSessionOpenNow(const string sym, bool &out24x7) const
    {
-      datetime now = TimeCurrent();
+      datetime now = SafeCurrentTime();
       MqlDateTime dt;
       TimeToStruct(now, dt);
       ENUM_DAY_OF_WEEK dow = (ENUM_DAY_OF_WEEK)dt.day_of_week;
@@ -357,7 +392,7 @@ private:
 
    double EstimateCommissionFromHistory(const string sym)
    {
-      datetime now = TimeCurrent();
+      datetime now = SafeCurrentTime();
       if(now <= 0) return m_defaultCommissionPerLot;
       if(m_commissionChecked && (m_commissionDiscovered || (now - m_lastCommCheck) < 300))
          return m_profile.estCommissionPerLot;
@@ -390,6 +425,8 @@ public:
    CSymbolIntelligence()
    {
       m_profile.Reset();
+      m_assetOverride = ASSET_OVERRIDE_AUTO;
+      m_autoTuneFromHistory = true;
       m_diag = NULL;
       m_defaultCommissionPerLot = 0.0;
       m_commissionChecked = false;
@@ -397,9 +434,13 @@ public:
       m_lastCommCheck = 0;
    }
 
-   bool Initialize(const string symbol, const ENUM_TIMEFRAMES primaryTF, const double fallbackCommPerLot, CDiagnostics *diag)
+   bool Initialize(const string symbol, const ENUM_TIMEFRAMES primaryTF, const double fallbackCommPerLot,
+                   CDiagnostics *diag, const ENUM_ASSET_CLASS_OVERRIDE assetOverride = ASSET_OVERRIDE_AUTO,
+                   const bool autoTuneFromHistory = true)
    {
       m_diag = diag;
+      m_assetOverride = assetOverride;
+      m_autoTuneFromHistory = autoTuneFromHistory;
       m_defaultCommissionPerLot = MathMax(0.0, fallbackCommPerLot);
       m_commissionChecked = false;
       m_commissionDiscovered = false;
@@ -432,6 +473,19 @@ public:
       m_profile.currencyMargin = SymbolInfoString(sym, SYMBOL_CURRENCY_MARGIN);
       bool isStep = false, isBurst = false;
       m_profile.assetClass     = ClassifySymbol(sym, m_profile.baseSymbol, m_profile.currencyBase, m_profile.currencyProfit, isStep, isBurst);
+      if(m_assetOverride != ASSET_OVERRIDE_AUTO)
+      {
+         m_profile.assetClass = (ENUM_ASSET_CLASS)((int)m_assetOverride);
+         string symU = sym;
+         StringToUpper(symU);
+         if(m_profile.assetClass == ASSET_SYNTHETIC && StringFind(symU, "STEP") >= 0)
+            isStep = true;
+      }
+      if(m_profile.empiricalQuantizedStep && m_profile.assetClass == ASSET_CFD)
+      {
+         isStep = true;
+         m_profile.assetClass = ASSET_SYNTHETIC;
+      }
       m_profile.isStepIndex    = isStep;
       m_profile.isSyntheticBurst = isBurst;
 
@@ -480,11 +534,14 @@ public:
       m_profile.hasRealVolume = (realVol > 0);
       m_profile.availableBarsPrimary = Bars(sym, primaryTF);
       m_profile.estCommissionPerLot = EstimateCommissionFromHistory(sym);
-      m_profile.lastInspected = TimeCurrent();
+      m_profile.lastInspected = SafeCurrentTime();
 
-      m_profile.pipSize     = ComputePipSize(m_profile.assetClass, m_profile.digits, m_profile.point, m_profile.tickSize);
-      m_profile.autoMaxSpreadPts = ComputeBaseAutoSpreadFloorPts(m_profile.assetClass, m_profile.point, m_profile.pipSize);
-      m_profile.recommendedSlippagePts = (int)MathMax(20.0, MathMin(250.0, (double)m_profile.spreadPoints * 0.8 + 15.0));
+      double refBid = SymbolInfoDouble(sym, SYMBOL_BID);
+      m_profile.pipSize = ComputePipSize(m_profile.assetClass, m_profile.digits, m_profile.point, m_profile.tickSize);
+      double baseFloor = ComputeBaseAutoSpreadFloorPts(m_profile.assetClass, m_profile.point, m_profile.pipSize, refBid);
+      double initSprFloor = (m_profile.spreadPoints > 0) ? ((double)m_profile.spreadPoints * 2.40) : baseFloor;
+      m_profile.autoMaxSpreadPts = MathMax(baseFloor, initSprFloor);
+      m_profile.recommendedSlippagePts = (int)MathMax(20.0, MathMin(400.0, (double)m_profile.spreadPoints * 0.8 + 15.0));
 
       m_profile.isValid = (m_profile.point > 0.0 && m_profile.tickSize > 0.0 && m_profile.volumeStep > 0.0 && m_profile.volumeMin > 0.0);
       return m_profile.isValid;
@@ -501,11 +558,89 @@ public:
       if(typicalAtr > 0.0) m_profile.typicalAtrPrice = typicalAtr;
       if(typicalSpreadPts > 0.0) m_profile.typicalSpreadPoints = typicalSpreadPts;
 
-      double baseFloor = ComputeBaseAutoSpreadFloorPts(m_profile.assetClass, m_profile.point, m_profile.pipSize);
-      double atrPtsCap = (typicalAtr > 0.0 && m_profile.point > 0.0) ? ((typicalAtr / m_profile.point) * 0.28) : baseFloor;
+      double refBid = SymbolInfoDouble(m_profile.symbol, SYMBOL_BID);
+      double baseFloor = ComputeBaseAutoSpreadFloorPts(m_profile.assetClass, m_profile.point, m_profile.pipSize, refBid);
+      double atrPtsCap = (typicalAtr > 0.0 && m_profile.point > 0.0) ? ((typicalAtr / m_profile.point) * 0.30) : baseFloor;
       double typSpreadCap = (typicalSpreadPts > 0.0) ? (typicalSpreadPts * 2.40) : baseFloor;
-      m_profile.autoMaxSpreadPts = MathMax(baseFloor, MathMin(MathMax(atrPtsCap, baseFloor), typSpreadCap * 1.5 + baseFloor * 0.25));
-      m_profile.recommendedSlippagePts = (int)MathMax(20.0, MathMin(300.0, typicalSpreadPts * 0.9 + 15.0));
+      m_profile.autoMaxSpreadPts = MathMax(baseFloor, MathMax(atrPtsCap, typSpreadCap));
+      m_profile.recommendedSlippagePts = (int)MathMax(20.0, MathMin(400.0, typicalSpreadPts * 0.9 + 15.0));
+
+      if(typicalAtr > 0.0 && m_profile.point > 0.0 && typicalSpreadPts > 0.0)
+         m_profile.spreadToAtrBaselinePct = ((typicalSpreadPts * m_profile.point) / typicalAtr) * 100.0;
+   }
+
+   void CalibrateFromHistory(const MqlRates &rates[], const int count, const double curAtr)
+   {
+      if(!m_autoTuneFromHistory || count < 20 || curAtr <= 0.0)
+         return;
+
+      int n = MathMin(48, count);
+      double netMove = MathAbs(rates[0].close - rates[n - 1].close);
+      double sumStep = 0.0, sumWick = 0.0, sumRange = 0.0;
+      int spikeBars = 0;
+      double minStepDelta = 1e12;
+      double deltas[48];
+      int dCount = 0;
+
+      for(int i = 0; i < n; i++)
+      {
+         double rng = rates[i].high - rates[i].low;
+         double bodyTop = MathMax(rates[i].open, rates[i].close);
+         double bodyBot = MathMin(rates[i].open, rates[i].close);
+         double wicks = MathMax(0.0, (rates[i].high - bodyTop) + (bodyBot - rates[i].low));
+         if(rng > 0.0)
+         {
+            sumRange += rng;
+            sumWick  += wicks;
+            if(rng > curAtr * 2.35)
+               spikeBars++;
+         }
+         if(i < n - 1)
+         {
+            double delta = MathAbs(rates[i].close - rates[i + 1].close);
+            sumStep += delta;
+            if(delta > m_profile.point * 0.5)
+            {
+               deltas[dCount++] = delta;
+               if(delta < minStepDelta) minStepDelta = delta;
+            }
+         }
+      }
+
+      if(sumStep > 0.0)
+         m_profile.empiricalEffRatio = MathMax(0.0, MathMin(1.0, netMove / sumStep));
+      if(sumRange > 0.0)
+      {
+         m_profile.avgWickRatio      = MathMax(0.0, MathMin(0.95, sumWick / sumRange));
+         m_profile.medianBarRangeAtr = MathMax(0.25, MathMin(3.0, (sumRange / (double)n) / curAtr));
+      }
+      m_profile.spikeBarRatio = (n > 0) ? ((double)spikeBars / (double)n) : 0.0;
+
+      // Quantized step detection (identifies Step Index / fixed-step synthetics empirically)
+      if(dCount >= 16 && minStepDelta > m_profile.tickSize * 1.5 && minStepDelta < curAtr * 0.75)
+      {
+         int quantizedMatches = 0;
+         for(int i = 0; i < dCount; i++)
+         {
+            double ratio = deltas[i] / minStepDelta;
+            if(MathAbs(ratio - MathRound(ratio)) <= 0.04)
+               quantizedMatches++;
+         }
+         if(((double)quantizedMatches / (double)dCount) >= 0.72)
+         {
+            m_profile.empiricalQuantizedStep = true;
+            m_profile.quantizedStepSize      = minStepDelta;
+            m_profile.isStepIndex            = true;
+         }
+      }
+
+      m_profile.empiricalProfileReady = true;
+      m_profile.microstructureSummary = StringFormat("ER=%.2f Wick=%.0f%% Spk=%.0f%% SprATR=%.1f%% Step=%s",
+                                                     m_profile.empiricalEffRatio,
+                                                     m_profile.avgWickRatio * 100.0,
+                                                     m_profile.spikeBarRatio * 100.0,
+                                                     m_profile.spreadToAtrBaselinePct,
+                                                     m_profile.empiricalQuantizedStep ? "Quantized" : "Continuous");
    }
 
    void RecordMeasuredSlippage(const double slippagePts)
@@ -536,7 +671,16 @@ public:
       return baseFloor;
    }
 
-   SSymbolProfile GetProfile() const { return m_profile; }
+   SSymbolProfile   GetProfile() const               { return m_profile; }
+   double           GetPoint() const                 { return m_profile.point; }
+   double           GetTickSize() const              { return m_profile.tickSize; }
+   double           GetPipSize() const               { return m_profile.pipSize; }
+   bool             HasRealVolume() const            { return m_profile.hasRealVolume; }
+   bool             IsStepIndex() const              { return m_profile.isStepIndex; }
+   bool             IsSynthetic24x7() const          { return m_profile.isSynthetic24x7; }
+   bool             IsSessionOpenNow() const         { return m_profile.sessionOpenNow; }
+   bool             IsEmpiricalProfileReady() const  { return m_profile.empiricalProfileReady; }
+   ENUM_ASSET_CLASS GetAssetClass() const            { return m_profile.assetClass; }
 
    SAdaptiveAssetProfile GetAdaptiveAssetProfile() const
    {
@@ -728,6 +872,26 @@ public:
             ap.tuningNotes         = "24/7 crypto volatility & spread-cushion scaling";
             break;
 
+         case ASSET_EQUITY:
+            ap.profileName         = "Equity / Stock CFD";
+            ap.slAtrMult           = 1.80;
+            ap.tpAtrMult           = 3.10;
+            ap.beTriggerAtr        = 1.50;
+            ap.partialTriggerAtr   = 2.00;
+            ap.partialFraction     = 0.40;
+            ap.trailStartAtr       = 2.10;
+            ap.trailStepAtr        = 1.05;
+            ap.adxStrongThresh     = 26.0;
+            ap.adxWeakThresh       = 17.0;
+            ap.maxSpreadAtrPct     = 30.0;
+            ap.maxVolatilityRatio  = 3.60;
+            ap.minSignalScore      = 61.0;
+            ap.lossCooldownBars    = 3;
+            ap.recommendedSlippagePts = MathMax(35, m_profile.recommendedSlippagePts);
+            ap.allow24x7Continuous = false;
+            ap.tuningNotes         = "Gap & wick-safe Equity CFD scaling";
+            break;
+
          default:
             ap.profileName         = "Broker CFD (Generic Auto)";
             ap.slAtrMult           = 1.75;
@@ -743,6 +907,36 @@ public:
             ap.allow24x7Continuous = m_profile.isSynthetic24x7;
             ap.tuningNotes         = "Dynamic tick/contract-normalized CFD baseline";
             break;
+      }
+
+      // Apply Empirical Market-DNA micro-adjustments learned from symbol history
+      if(m_autoTuneFromHistory && m_profile.empiricalProfileReady)
+      {
+         // High-wick instruments receive slightly wider SL & trail cushion so liquidity wicks don't hunt stops
+         if(m_profile.avgWickRatio > 0.56)
+         {
+            ap.slAtrMult    += 0.15;
+            ap.trailStepAtr += 0.10;
+         }
+         // Spiky outlier instruments (Boom/Crash bursts, high-beta open spikes) get extra SL clearance & score discipline
+         if(m_profile.spikeBarRatio >= 0.08)
+         {
+            ap.slAtrMult     += 0.15;
+            ap.trailStepAtr  += 0.10;
+            ap.minSignalScore = MathMin(72.0, ap.minSignalScore + 2.0);
+         }
+         // Smooth trending symbols earn extended take-profit targets
+         if(m_profile.empiricalEffRatio >= 0.36)
+         {
+            ap.tpAtrMult += 0.25;
+         }
+         // High friction (spread consumes large slice of ATR) requires stronger score & higher R:R target
+         if(m_profile.spreadToAtrBaselinePct >= 14.0)
+         {
+            ap.minSignalScore = MathMin(72.0, ap.minSignalScore + 3.0);
+            ap.tpAtrMult     += 0.25;
+            ap.beTriggerAtr  += 0.10;
+         }
       }
       return ap;
    }
@@ -769,7 +963,7 @@ public:
    double GetMinStopDistancePrice() const
    {
       int effectiveStops = MathMax(m_profile.stopsLevelPoints, m_profile.freezeLevelPoints);
-      return (double)(effectiveStops + 3) * m_profile.point;
+      return MathMax((double)(effectiveStops + 3) * m_profile.point, m_profile.tickSize * 2.0);
    }
 
    double ResolveFallbackTickValue() const

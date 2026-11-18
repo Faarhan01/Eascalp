@@ -1,7 +1,7 @@
 //+------------------------------------------------------------------+
 //|                                                  Diagnostics.mqh |
 //|                        Advanced Multi-Market MT5 Scalping EA     |
-//|                        Structured Logging & Diagnostic Subsystem |
+//|                        v2.9.0 Structured Logging & Diagnostics   |
 //+------------------------------------------------------------------+
 #ifndef __ASEA_CORE_DIAGNOSTICS_MQH__
 #define __ASEA_CORE_DIAGNOSTICS_MQH__
@@ -19,6 +19,7 @@ private:
    int               m_warningCount;
    datetime          m_lastLogTimeByKey[];
    string            m_throttleKeys[];
+   int               m_throttleCursor;
 
    string SeverityToStr(const ENUM_LOG_SEVERITY level) const
    {
@@ -37,7 +38,7 @@ private:
    {
       if(cooldownSeconds <= 0 || key == "")
          return false;
-      datetime now = TimeCurrent();
+      datetime now = SafeCurrentTime();
       int count = ArraySize(m_throttleKeys);
       for(int i = 0; i < count; i++)
       {
@@ -56,6 +57,13 @@ private:
          m_throttleKeys[count] = key;
          m_lastLogTimeByKey[count] = now;
       }
+      else
+      {
+         int slot = m_throttleCursor % 128;
+         m_throttleKeys[slot] = key;
+         m_lastLogTimeByKey[slot] = now;
+         m_throttleCursor = (m_throttleCursor + 1) % 128;
+      }
       return false;
    }
 
@@ -68,6 +76,7 @@ public:
       m_logFilePath = "";
       m_errorCount = 0;
       m_warningCount = 0;
+      m_throttleCursor = 0;
    }
 
    bool Initialize(const string symbol, const long magic, const ENUM_LOG_SEVERITY minLevel, const bool logToFile, const bool printToJournal)
@@ -77,6 +86,7 @@ public:
       m_printToJournal = printToJournal;
       m_errorCount = 0;
       m_warningCount = 0;
+      m_throttleCursor = 0;
       ArrayResize(m_throttleKeys, 0);
       ArrayResize(m_lastLogTimeByKey, 0);
       m_logFilePath = "";
@@ -87,8 +97,7 @@ public:
          FolderCreate(EA_DATA_ROOT);
          FolderCreate(folder);
 
-         datetime tsRef = TimeCurrent();
-         if(tsRef <= 0) tsRef = TimeLocal();
+         datetime tsRef = SafeCurrentTime();
          MqlDateTime dt;
          TimeToStruct(tsRef, dt);
          m_logFilePath = StringFormat("%s\\asea_%s_%I64d_%04d%02d%02d.log",
@@ -110,7 +119,7 @@ public:
       else if(level >= LOG_ERROR)
          m_errorCount++;
 
-      string ts = TimeToString(TimeCurrent(), TIME_DATE | TIME_SECONDS);
+      string ts = TimeToString(SafeCurrentTime(), TIME_DATE | TIME_SECONDS);
       string line = StringFormat("[%s] [%s] [%s] %s", ts, SeverityToStr(level), module, message);
 
       if(m_printToJournal)
@@ -128,8 +137,9 @@ public:
       }
    }
 
-   int GetErrorCount() const   { return m_errorCount; }
-   int GetWarningCount() const { return m_warningCount; }
+   bool IsLevelEnabled(const ENUM_LOG_SEVERITY level) const { return (level >= m_minLevel); }
+   int  GetErrorCount() const   { return m_errorCount; }
+   int  GetWarningCount() const { return m_warningCount; }
 };
 
 #endif // __ASEA_CORE_DIAGNOSTICS_MQH__

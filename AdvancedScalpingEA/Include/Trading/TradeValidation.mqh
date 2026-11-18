@@ -1,7 +1,7 @@
 //+------------------------------------------------------------------+
 //|                                              TradeValidation.mqh |
 //|                        Advanced Multi-Market MT5 Scalping EA     |
-//|                        v2.0.0 Pre-Execution Validation & Stats   |
+//|                        v2.9.0 Pre-Execution Validation & Stats   |
 //+------------------------------------------------------------------+
 #ifndef __ASEA_TRADING_TRADEVALIDATION_MQH__
 #define __ASEA_TRADING_TRADEVALIDATION_MQH__
@@ -19,12 +19,17 @@ struct SValidationConfig
    double minVolatilityRatio;
    int    minRequiredBars;
    bool   requireMtfNoStrongConflict;
+   bool   allowCounterTrendTrades;
+   bool   requireVwapConfluence;
+   int    minConsensusSignals;
    bool   requireEconomicallyViableExp;
    bool   enableSessionFilter;
    int    sessionStartHour;
    int    sessionEndHour;
    bool   avoidFridayLateHours;
    int    fridayCutoffHour;
+   bool   avoidRolloverWindow;
+   int    rolloverBlackoutMinutes;
 
    void ResetDefaults()
    {
@@ -36,12 +41,17 @@ struct SValidationConfig
       minVolatilityRatio = 0.30;
       minRequiredBars = 50;
       requireMtfNoStrongConflict = true;
+      allowCounterTrendTrades = false;
+      requireVwapConfluence = false;
+      minConsensusSignals = 1;
       requireEconomicallyViableExp = true;
       enableSessionFilter = false;
       sessionStartHour = 7;
       sessionEndHour = 21;
       avoidFridayLateHours = false;
       fridayCutoffHour = 21;
+      avoidRolloverWindow = true;
+      rolloverBlackoutMinutes = 20;
    }
 };
 
@@ -78,6 +88,14 @@ private:
    {
       MqlDateTime dt;
       TimeToStruct(now, dt);
+
+      if(!is24x7 && m_cfg.avoidRolloverWindow && m_cfg.rolloverBlackoutMinutes > 0)
+      {
+         int minsOfDay = dt.hour * 60 + dt.min;
+         int win = MathMin(90, m_cfg.rolloverBlackoutMinutes);
+         if(minsOfDay < win || minsOfDay >= (1440 - win))
+            return false;
+      }
 
       if(m_cfg.avoidFridayLateHours && !is24x7 && dt.day_of_week == FRIDAY && dt.hour >= m_cfg.fridayCutoffHour)
          return false;
@@ -140,13 +158,59 @@ public:
          return res;
       }
 
-      // 3. MTF strong conflict guard
+      // 2b. Minimum multi-strategy consensus count
+      if(m_cfg.minConsensusSignals > 1 && sig.consensusCount < m_cfg.minConsensusSignals)
+      {
+         m_stats.rejOther++;
+         res.rejectionCode = "INSUFFICIENT_CONSENSUS";
+         res.rejectionReason = StringFormat("Strategy consensus %d below required minimum %d.", sig.consensusCount, m_cfg.minConsensusSignals);
+         return res;
+      }
+
+      // 3. MTF strong conflict guard & Counter-HTF policy
       if(m_cfg.requireMtfNoStrongConflict && mtf.hasStrongConflict)
       {
          m_stats.rejMtfConflict++;
          res.rejectionCode = "MTF_CONFLICT";
          res.rejectionReason = "Multi-timeframe conflict: " + mtf.conflictReason;
          return res;
+      }
+
+      bool counterHtf = ((sig.direction == SIGNAL_BUY && mtf.higherBias == SIGNAL_SELL) ||
+                         (sig.direction == SIGNAL_SELL && mtf.higherBias == SIGNAL_BUY));
+      if(!m_cfg.allowCounterTrendTrades && counterHtf)
+      {
+         bool isMeanRevOrSweep = (sig.strategyId == STRAT_REVERSAL_SCALPING ||
+                                  sig.strategyId == STRAT_RANGE_SCALPING ||
+                                  sig.strategyId == STRAT_LIQUIDITY_SWEEP ||
+                                  sig.strategyId == STRAT_VWAP_REVERSION);
+         if(!isMeanRevOrSweep || sig.compositeScore < (effMinScore + 8.0))
+         {
+            m_stats.rejMtfConflict++;
+            res.rejectionCode = "COUNTER_HTF_BLOCKED";
+            res.rejectionReason = "Counter-HTF direction blocked by trend-alignment discipline.";
+            return res;
+         }
+      }
+
+      // 3b. Optional Session VWAP directional confluence for trend/breakout strategies
+      if(m_cfg.requireVwapConfluence && ind.vwapAvailable && ind.vwap > 0.0)
+      {
+         bool isTrendMomentumStrat = (sig.strategyId == STRAT_TREND_PULLBACK ||
+                                      sig.strategyId == STRAT_MOMENTUM_SCALPING ||
+                                      sig.strategyId == STRAT_BREAKOUT_SCALPING ||
+                                      sig.strategyId == STRAT_VOLATILITY_EXPANSION ||
+                                      sig.strategyId == STRAT_MICRO_MOMENTUM ||
+                                      sig.strategyId == STRAT_EMA_RIBBON);
+         if(isTrendMomentumStrat &&
+            ((sig.direction == SIGNAL_BUY && market.close < ind.vwap) ||
+             (sig.direction == SIGNAL_SELL && market.close > ind.vwap)))
+         {
+            m_stats.rejOther++;
+            res.rejectionCode = "VWAP_ALIGNMENT_REQUIRED";
+            res.rejectionReason = "Trend/momentum entry blocked on unfavorable side of Session VWAP.";
+            return res;
+         }
       }
 
       // 4. Historical data & market data readiness
@@ -168,11 +232,13 @@ public:
          res.rejectionReason = StringFormat("Spread %.1f pts exceeds cap %.1f pts.", market.spreadPoints, spreadCap);
          return res;
       }
-      if(market.spreadRatio > effMaxSprRatio)
+      double pipPts = (prof.point > 0.0 && prof.pipSize > 0.0) ? MathMax(1.0, prof.pipSize / prof.point) : 1.0;
+      double sprFloorPts = MathMax(3.0, pipPts * 1.2);
+      if(market.spreadRatio > effMaxSprRatio && market.spreadPoints > sprFloorPts)
       {
          m_stats.rejSpread++;
          res.rejectionCode = "SPREAD_SPIKE";
-         res.rejectionReason = StringFormat("Spread ratio %.2fx exceeds limit %.2fx.", market.spreadRatio, effMaxSprRatio);
+         res.rejectionReason = StringFormat("Spread %.1f pts (ratio %.2fx) exceeds limit %.2fx.", market.spreadPoints, market.spreadRatio, effMaxSprRatio);
          return res;
       }
       if(ind.isReady && ind.atr > 0.0 && prof.point > 0.0)
@@ -215,7 +281,7 @@ public:
       {
          m_stats.rejSession++;
          res.rejectionCode = "SESSION_FILTER_BLOCKED";
-         res.rejectionReason = "Outside configured active trading hours or Friday cutoff.";
+         res.rejectionReason = "Outside active trading hours, Friday cutoff, or midnight rollover blackout.";
          return res;
       }
 

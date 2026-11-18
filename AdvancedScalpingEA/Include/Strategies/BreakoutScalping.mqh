@@ -1,7 +1,7 @@
 //+------------------------------------------------------------------+
 //|                                             BreakoutScalping.mqh |
 //|                        Advanced Multi-Market MT5 Scalping EA     |
-//|                        v2.0.0 Retest & Displacement Breakout     |
+//|                        v2.9.0 Retest & Displacement Breakout     |
 //+------------------------------------------------------------------+
 #ifndef __ASEA_STRATEGIES_BREAKOUTSCALPING_MQH__
 #define __ASEA_STRATEGIES_BREAKOUTSCALPING_MQH__
@@ -12,17 +12,21 @@ class CStrategyBreakoutScalping : public CStrategyBase
 {
 private:
    double m_minBodyAtrRatio;
+   double m_minRvol;
 
 public:
    CStrategyBreakoutScalping() : CStrategyBase(STRAT_BREAKOUT_SCALPING, "Breakout Scalping")
    {
       m_minBodyAtrRatio = 0.35;
+      m_minRvol = 0.72;
    }
 
-   void Configure(const bool enabled, const double slMult, const double tpMult, const int minSample, const double minBodyAtrRatio)
+   void Configure(const bool enabled, const double slMult, const double tpMult, const int minSample,
+                  const double minBodyAtrRatio, const double minRvol = 0.72)
    {
       ConfigureBase(enabled, slMult, tpMult, minSample);
       m_minBodyAtrRatio = MathMax(0.2, MathMin(1.5, minBodyAtrRatio));
+      m_minRvol = MathMax(0.40, MathMin(3.0, minRvol));
    }
 
    virtual ENUM_STRATEGY_SUITABILITY GetRegimeSuitability(const ENUM_MARKET_REGIME regime) const override
@@ -61,47 +65,70 @@ public:
          return false;
       }
 
+      if(ctx.ind.relativeVolume < m_minRvol)
+      {
+         outRejectReason = StringFormat("Relative volume %.2f below %.2f for breakout conviction", ctx.ind.relativeVolume, m_minRvol);
+         return false;
+      }
+
+      double barRange = MathMax(ctx.market.high - ctx.market.low, MathMax(ctx.symbolProfile.point, 0.0000001));
       double body = MathAbs(ctx.market.close - ctx.market.open);
-      bool strongBody = (body >= ctx.ind.atr * m_minBodyAtrRatio) && (ctx.market.normalizedBarRangeAtr >= 0.70);
-      bool activityConfirm = (ctx.regime.volatilityRatio >= 0.90 || ctx.ticks.activityRatio >= 1.05 || ctx.market.normalizedBarRangeAtr >= 0.95);
+      bool strongBody = (body >= ctx.ind.atr * m_minBodyAtrRatio) &&
+                        (body >= barRange * 0.48) &&
+                        (ctx.market.normalizedBarRangeAtr >= 0.70);
+      bool bullCloseConv = ((ctx.market.close - ctx.market.low) >= barRange * 0.62);
+      bool bearCloseConv = ((ctx.market.high - ctx.market.close) >= barRange * 0.62);
+      bool activityConfirm = (ctx.regime.volatilityRatio >= 0.90 || ctx.ticks.activityRatio >= 1.05 ||
+                              ctx.market.normalizedBarRangeAtr >= 0.95 || ctx.ind.relativeVolume >= 1.20);
       double effSlMult = GetEffectiveSlMult(ctx, 1.0);
       double effTpMult = GetEffectiveTpMult(ctx, 1.08);
 
+      bool bullMtfTailwind = (ctx.mtf.higherBias == SIGNAL_BUY) || (ctx.mtf.higherBias == SIGNAL_NONE && ctx.mtf.intermediateBias == SIGNAL_BUY);
+      bool bearMtfTailwind = (ctx.mtf.higherBias == SIGNAL_SELL) || (ctx.mtf.higherBias == SIGNAL_NONE && ctx.mtf.intermediateBias == SIGNAL_SELL);
+      bool bullWallClear = !(ctx.structure.nearestResistance > ctx.market.close &&
+                             (ctx.structure.nearestResistance - ctx.market.close) < ctx.ind.atr * 0.75 &&
+                             ctx.structure.resistanceRejectCount >= 2);
+      bool bearWallClear = !(ctx.structure.nearestSupport > 0.0 &&
+                             ctx.structure.nearestSupport < ctx.market.close &&
+                             (ctx.market.close - ctx.structure.nearestSupport) < ctx.ind.atr * 0.75 &&
+                             ctx.structure.supportRejectCount >= 2);
+
       // High-conviction breakout retest OR confirmed fresh breakout (Structure / Chart Pattern / Donchian)
       bool bullRetest = (ctx.structure.lastEvent == STRUCT_RETEST_BULL && ctx.market.close > ctx.market.open &&
-                         ctx.candle.bias != SIGNAL_SELL && ctx.ind.emaFast >= ctx.ind.emaMedium);
+                         bullCloseConv && ctx.candle.bias != SIGNAL_SELL && ctx.ind.emaFast >= ctx.ind.emaMedium);
       bool bearRetest = (ctx.structure.lastEvent == STRUCT_RETEST_BEAR && ctx.market.close < ctx.market.open &&
-                         ctx.candle.bias != SIGNAL_BUY && ctx.ind.emaFast <= ctx.ind.emaMedium);
+                         bearCloseConv && ctx.candle.bias != SIGNAL_BUY && ctx.ind.emaFast <= ctx.ind.emaMedium);
       bool bullDonchianBreak = (ctx.ind.donchianHigh > 0.0 && ctx.market.close > ctx.ind.donchianHigh &&
                                 ctx.market.close > ctx.ind.bbUpper && ctx.ind.emaFast > ctx.ind.emaMedium);
       bool bearDonchianBreak = (ctx.ind.donchianLow > 0.0 && ctx.market.close < ctx.ind.donchianLow &&
                                 ctx.market.close < ctx.ind.bbLower && ctx.ind.emaFast < ctx.ind.emaMedium);
 
-      bool bullMomOk = (ctx.market.close > ctx.market.open && ctx.ind.macdHist > 0.0 && ctx.ind.adxMain >= 15.0 && ctx.ind.emaFast > ctx.ind.emaMedium);
-      bool bearMomOk = (ctx.market.close < ctx.market.open && ctx.ind.macdHist < 0.0 && ctx.ind.adxMain >= 15.0 && ctx.ind.emaFast < ctx.ind.emaMedium);
+      bool bullMomOk = (ctx.market.close > ctx.market.open && bullCloseConv && ctx.ind.macdHist > 0.0 && ctx.ind.adxMain >= 16.0 && ctx.ind.emaFast > ctx.ind.emaMedium);
+      bool bearMomOk = (ctx.market.close < ctx.market.open && bearCloseConv && ctx.ind.macdHist < 0.0 && ctx.ind.adxMain >= 16.0 && ctx.ind.emaFast < ctx.ind.emaMedium);
 
-      bool bullBreak = (ctx.mtf.higherBias != SIGNAL_SELL) &&
+      bool bullBreak = (bullMtfTailwind && bullWallClear) &&
                        (bullRetest ||
                         ((ctx.structure.lastEvent == STRUCT_BOS_BULL || ctx.structure.lastEvent == STRUCT_BREAKOUT_UP ||
                           bullDonchianBreak ||
                           (ctx.chartPattern.pattern != PATTERN_NONE && ctx.chartPattern.bias == SIGNAL_BUY && ctx.market.close > ctx.chartPattern.breakoutLevel)) &&
                          strongBody && activityConfirm && bullMomOk));
 
-      bool bearBreak = (ctx.mtf.higherBias != SIGNAL_BUY) &&
+      bool bearBreak = (bearMtfTailwind && bearWallClear) &&
                        (bearRetest ||
                         ((ctx.structure.lastEvent == STRUCT_BOS_BEAR || ctx.structure.lastEvent == STRUCT_BREAKOUT_DOWN ||
                           bearDonchianBreak ||
                           (ctx.chartPattern.pattern != PATTERN_NONE && ctx.chartPattern.bias == SIGNAL_SELL && ctx.market.close < ctx.chartPattern.breakoutLevel)) &&
                          strongBody && activityConfirm && bearMomOk));
 
-      if(bullBreak && ctx.ind.rsi < 74.0)
+      if(bullBreak && ctx.ind.rsi < 72.0)
       {
          double slDist = ComputeStructuralSLDist(ctx, SIGNAL_BUY, effSlMult, effSlMult * 1.40);
          double tpMultEff = ctx.mtf.alignedBullish ? (effTpMult * 1.20) : effTpMult;
          double tpDist = MathMax(slDist * 1.55, ctx.ind.atr * tpMultEff);
          string desc = bullRetest ? "Bullish breakout retest confirmation" : "Confirmed bullish structural/Donchian breakout with displacement";
          PopulateCommonSignal(outSignal, ctx, SIGNAL_BUY, slDist, tpDist, bullRetest ? 0.86 : 0.80, desc,
-                              StringFormat("BarRange=%.2fATR, VolR=%.2f, TickAct=%.2f", ctx.market.normalizedBarRangeAtr, ctx.regime.volatilityRatio, ctx.ticks.activityRatio),
+                              StringFormat("BarRange=%.2fATR, VolR=%.2f, RVOL=%.2f, TickAct=%.2f",
+                                           ctx.market.normalizedBarRangeAtr, ctx.regime.volatilityRatio, ctx.ind.relativeVolume, ctx.ticks.activityRatio),
                               ctx.structure.summary, ctx.chartPattern.name,
                               ctx.mtf.hasStrongConflict ? ctx.mtf.conflictReason : "None");
          return true;
@@ -114,7 +141,8 @@ public:
          double tpDist = MathMax(slDist * 1.55, ctx.ind.atr * tpMultEff);
          string desc = bearRetest ? "Bearish breakout retest confirmation" : "Confirmed bearish structural/Donchian breakout with displacement";
          PopulateCommonSignal(outSignal, ctx, SIGNAL_SELL, slDist, tpDist, bearRetest ? 0.86 : 0.80, desc,
-                              StringFormat("BarRange=%.2fATR, VolR=%.2f, TickAct=%.2f", ctx.market.normalizedBarRangeAtr, ctx.regime.volatilityRatio, ctx.ticks.activityRatio),
+                              StringFormat("BarRange=%.2fATR, VolR=%.2f, RVOL=%.2f, TickAct=%.2f",
+                                           ctx.market.normalizedBarRangeAtr, ctx.regime.volatilityRatio, ctx.ind.relativeVolume, ctx.ticks.activityRatio),
                               ctx.structure.summary, ctx.chartPattern.name,
                               ctx.mtf.hasStrongConflict ? ctx.mtf.conflictReason : "None");
          return true;

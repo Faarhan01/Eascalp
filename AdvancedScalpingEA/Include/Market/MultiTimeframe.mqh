@@ -1,7 +1,7 @@
 //+------------------------------------------------------------------+
 //|                                               MultiTimeframe.mqh |
 //|                        Advanced Multi-Market MT5 Scalping EA     |
-//|                        v2.0.0 Weighted MTF Context Engine        |
+//|                        v2.9.0 Weighted MTF Context Engine        |
 //+------------------------------------------------------------------+
 #ifndef __ASEA_MARKET_MULTITIMEFRAME_MQH__
 #define __ASEA_MARKET_MULTITIMEFRAME_MQH__
@@ -23,8 +23,11 @@ private:
    SMTFAnalysis    m_analysis;
    datetime        m_lastHtfBar;
    datetime        m_lastItfBar;
+   datetime        m_lastLtfEvalBar;
+   int             m_lastStructBias;
    bool            m_htfInitDone;
    bool            m_itfInitDone;
+   bool            m_ltfEvalDone;
    ENUM_SIGNAL_DIRECTION m_cachedHtfBias;
    ENUM_SIGNAL_DIRECTION m_cachedItfBias;
 
@@ -32,21 +35,26 @@ private:
    double          m_weightITF;
    double          m_weightLTF;
 
-   ENUM_SIGNAL_DIRECTION EvaluateTFBias(const int hFast, const int hSlow, const int hExtra, const bool isAdx) const
+   ENUM_SIGNAL_DIRECTION EvaluateTFBias(const ENUM_TIMEFRAMES tf, const int hFast, const int hSlow, const int hExtra, const bool isAdx, bool &outDataOk) const
    {
+      outDataOk = false;
       if(hFast == INVALID_HANDLE || hSlow == INVALID_HANDLE)
          return SIGNAL_NONE;
 
-      double fast[], slow[], extra[];
+      double fast[], slow[], extra[], cls[];
       ArraySetAsSeries(fast, true);
       ArraySetAsSeries(slow, true);
       ArraySetAsSeries(extra, true);
+      ArraySetAsSeries(cls, true);
 
-      if(CopyBuffer(hFast, 0, 1, 2, fast) < 2 || CopyBuffer(hSlow, 0, 1, 2, slow) < 2)
+      if(CopyBuffer(hFast, 0, 1, 2, fast) < 2 || CopyBuffer(hSlow, 0, 1, 2, slow) < 2 ||
+         CopyClose(m_symbol, tf, 1, 1, cls) < 1)
          return SIGNAL_NONE;
 
       bool risingFast  = (fast[0] > fast[1]);
       bool fallingFast = (fast[0] < fast[1]);
+      bool bullPriceOk = (cls[0] > slow[0]);
+      bool bearPriceOk = (cls[0] < slow[0]);
 
       if(isAdx && hExtra != INVALID_HANDLE)
       {
@@ -57,9 +65,10 @@ private:
             CopyBuffer(hExtra, 1, 1, 1, plusDI) >= 1 &&
             CopyBuffer(hExtra, 2, 1, 1, minusDI) >= 1)
          {
-            if(fast[0] > slow[0] && risingFast && plusDI[0] > minusDI[0] && extra[0] >= 16.0)
+            outDataOk = true;
+            if(fast[0] > slow[0] && risingFast && bullPriceOk && plusDI[0] >= minusDI[0] + 1.5 && extra[0] >= 16.0)
                return SIGNAL_BUY;
-            if(fast[0] < slow[0] && fallingFast && minusDI[0] > plusDI[0] && extra[0] >= 16.0)
+            if(fast[0] < slow[0] && fallingFast && bearPriceOk && minusDI[0] >= plusDI[0] + 1.5 && extra[0] >= 16.0)
                return SIGNAL_SELL;
          }
          return SIGNAL_NONE;
@@ -68,14 +77,16 @@ private:
       {
          if(CopyBuffer(hExtra, 0, 1, 1, extra) >= 1)
          {
-            if(fast[0] > slow[0] && risingFast && extra[0] > 51.0)  return SIGNAL_BUY;
-            if(fast[0] < slow[0] && fallingFast && extra[0] < 49.0) return SIGNAL_SELL;
+            outDataOk = true;
+            if(fast[0] > slow[0] && risingFast && bullPriceOk && extra[0] > 51.0)  return SIGNAL_BUY;
+            if(fast[0] < slow[0] && fallingFast && bearPriceOk && extra[0] < 49.0) return SIGNAL_SELL;
          }
          return SIGNAL_NONE;
       }
 
-      if(fast[0] > slow[0] && risingFast)  return SIGNAL_BUY;
-      if(fast[0] < slow[0] && fallingFast) return SIGNAL_SELL;
+      outDataOk = true;
+      if(fast[0] > slow[0] && risingFast && bullPriceOk)  return SIGNAL_BUY;
+      if(fast[0] < slow[0] && fallingFast && bearPriceOk) return SIGNAL_SELL;
       return SIGNAL_NONE;
    }
 
@@ -89,8 +100,8 @@ public:
       m_hEmaFastHigh = INVALID_HANDLE; m_hEmaSlowHigh = INVALID_HANDLE; m_hAdxHigh = INVALID_HANDLE;
       m_hEmaFastMid  = INVALID_HANDLE; m_hEmaSlowMid  = INVALID_HANDLE; m_hRsiMid  = INVALID_HANDLE;
       m_diag = NULL;
-      m_lastHtfBar = 0; m_lastItfBar = 0;
-      m_htfInitDone = false; m_itfInitDone = false;
+      m_lastHtfBar = 0; m_lastItfBar = 0; m_lastLtfEvalBar = 0; m_lastStructBias = 0;
+      m_htfInitDone = false; m_itfInitDone = false; m_ltfEvalDone = false;
       m_cachedHtfBias = SIGNAL_NONE; m_cachedItfBias = SIGNAL_NONE;
       m_weightHTF = 0.45; m_weightITF = 0.35; m_weightLTF = 0.20;
       m_analysis.Reset();
@@ -128,8 +139,8 @@ public:
       m_intermediateTF = interTF;
       m_lowerTF = lowerTF;
       m_diag = diag;
-      m_lastHtfBar = 0; m_lastItfBar = 0;
-      m_htfInitDone = false; m_itfInitDone = false;
+      m_lastHtfBar = 0; m_lastItfBar = 0; m_lastLtfEvalBar = 0; m_lastStructBias = 0;
+      m_htfInitDone = false; m_itfInitDone = false; m_ltfEvalDone = false;
       m_cachedHtfBias = SIGNAL_NONE; m_cachedItfBias = SIGNAL_NONE;
 
       m_hEmaFastHigh = iMA(m_symbol, m_higherTF, 21, 0, MODE_EMA, PRICE_CLOSE);
@@ -152,33 +163,66 @@ public:
 
    bool Evaluate(const CMarketData &data, const SIndicatorValues &lowerInd, const SStructureState &structure)
    {
+      if(!lowerInd.isReady || !data.IsDataReady())
+      {
+         m_analysis.Reset();
+         m_analysis.higherTF       = m_higherTF;
+         m_analysis.intermediateTF = m_intermediateTF;
+         m_analysis.lowerTF        = m_lowerTF;
+         m_ltfEvalDone             = false;
+         return false;
+      }
+
+      datetime ltfBar = data.GetBarTime();
+      datetime htfBar = iTime(m_symbol, m_higherTF, 0);
+      datetime itfBar = iTime(m_symbol, m_intermediateTF, 0);
+
+      // Zero-cost intra-bar fast path once HTF, ITF & LTF closed-bar evaluations match current bars
+      if(m_analysis.isReady && m_ltfEvalDone && m_htfInitDone && m_itfInitDone &&
+         ltfBar == m_lastLtfEvalBar && htfBar == m_lastHtfBar && itfBar == m_lastItfBar &&
+         structure.structureBias == m_lastStructBias)
+         return true;
+
       m_analysis.Reset();
       m_analysis.higherTF       = m_higherTF;
       m_analysis.intermediateTF = m_intermediateTF;
       m_analysis.lowerTF        = m_lowerTF;
 
-      if(!lowerInd.isReady)
-         return false;
-
-      // Cached HTF evaluation (only recompute when HTF closed bar updates or warmup completes)
-      datetime htfBar = iTime(m_symbol, m_higherTF, 0);
-      if(htfBar > 0 && (htfBar != m_lastHtfBar || !m_htfInitDone) &&
-         data.HasSufficientHistory(m_higherTF, 35) && BarsCalculated(m_hEmaSlowHigh) >= 4)
+      // Cached HTF evaluation (only cache once all HTF handles finish calculation)
+      if(htfBar > 0 && (htfBar != m_lastHtfBar || !m_htfInitDone))
       {
-         m_cachedHtfBias = EvaluateTFBias(m_hEmaFastHigh, m_hEmaSlowHigh, m_hAdxHigh, true);
-         m_lastHtfBar = htfBar;
-         m_htfInitDone = true;
+         bool htfHandlesReady = (BarsCalculated(m_hEmaFastHigh) >= 4 && BarsCalculated(m_hEmaSlowHigh) >= 4 &&
+                                 (m_hAdxHigh == INVALID_HANDLE || BarsCalculated(m_hAdxHigh) >= 4));
+         if(htfHandlesReady && data.HasSufficientHistory(m_higherTF, 35))
+         {
+            bool htfDataOk = false;
+            ENUM_SIGNAL_DIRECTION b = EvaluateTFBias(m_higherTF, m_hEmaFastHigh, m_hEmaSlowHigh, m_hAdxHigh, true, htfDataOk);
+            if(htfDataOk)
+            {
+               m_cachedHtfBias = b;
+               m_lastHtfBar = htfBar;
+               m_htfInitDone = true;
+            }
+         }
       }
       m_analysis.higherBias = m_cachedHtfBias;
 
       // Cached ITF evaluation
-      datetime itfBar = iTime(m_symbol, m_intermediateTF, 0);
-      if(itfBar > 0 && (itfBar != m_lastItfBar || !m_itfInitDone) &&
-         data.HasSufficientHistory(m_intermediateTF, 35) && BarsCalculated(m_hEmaSlowMid) >= 4)
+      if(itfBar > 0 && (itfBar != m_lastItfBar || !m_itfInitDone))
       {
-         m_cachedItfBias = EvaluateTFBias(m_hEmaFastMid, m_hEmaSlowMid, m_hRsiMid, false);
-         m_lastItfBar = itfBar;
-         m_itfInitDone = true;
+         bool itfHandlesReady = (BarsCalculated(m_hEmaFastMid) >= 4 && BarsCalculated(m_hEmaSlowMid) >= 4 &&
+                                 (m_hRsiMid == INVALID_HANDLE || BarsCalculated(m_hRsiMid) >= 4));
+         if(itfHandlesReady && data.HasSufficientHistory(m_intermediateTF, 35))
+         {
+            bool itfDataOk = false;
+            ENUM_SIGNAL_DIRECTION b = EvaluateTFBias(m_intermediateTF, m_hEmaFastMid, m_hEmaSlowMid, m_hRsiMid, false, itfDataOk);
+            if(itfDataOk)
+            {
+               m_cachedItfBias = b;
+               m_lastItfBar = itfBar;
+               m_itfInitDone = true;
+            }
+         }
       }
       m_analysis.intermediateBias = m_cachedItfBias;
 
@@ -230,6 +274,9 @@ public:
          m_analysis.assessmentSummary = "Neutral / Mixed TF bias";
       }
 
+      m_lastLtfEvalBar = ltfBar;
+      m_lastStructBias = structure.structureBias;
+      m_ltfEvalDone    = true;
       m_analysis.isReady = true;
       return true;
    }

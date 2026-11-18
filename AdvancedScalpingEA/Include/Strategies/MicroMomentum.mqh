@@ -1,7 +1,7 @@
 //+------------------------------------------------------------------+
 //|                                                MicroMomentum.mqh |
 //|                        Advanced Multi-Market MT5 Scalping EA     |
-//|                        v2.0.0 Strategy 7: Tick Micro-Momentum    |
+//|                        v2.9.0 Strategy 7: Tick Micro-Momentum    |
 //+------------------------------------------------------------------+
 #ifndef __ASEA_STRATEGIES_MICROMOMENTUM_MQH__
 #define __ASEA_STRATEGIES_MICROMOMENTUM_MQH__
@@ -92,6 +92,11 @@ public:
          outRejectReason = StringFormat("Tick persistence %.2f too low or velocity decelerating", ctx.ticks.directionalPersistence);
          return false;
       }
+      if(ctx.ind.momentumExhaustion || MathAbs(ctx.ind.emaDistanceAtr) > 1.85 || ctx.structure.failedBreakout)
+      {
+         outRejectReason = StringFormat("Overextended (%.2f ATR) or momentum exhaustion / failed breakout", ctx.ind.emaDistanceAtr);
+         return false;
+      }
 
       double pipPts = (ctx.symbolProfile.pipSize > 0.0 && ctx.symbolProfile.point > 0.0)
                       ? MathMax(1.0, ctx.symbolProfile.pipSize / ctx.symbolProfile.point)
@@ -99,6 +104,8 @@ public:
       double effMinVel = MathMax(0.30, m_minVelocityPtsSec * MathMax(0.25, pipPts * 0.1));
       double effSlMult = GetEffectiveSlMult(ctx, 1.00);
       double effTpMult = GetEffectiveTpMult(ctx, 0.95);
+      bool bullMtfTailwind = (ctx.mtf.higherBias == SIGNAL_BUY) || (ctx.mtf.higherBias == SIGNAL_NONE && ctx.mtf.intermediateBias == SIGNAL_BUY);
+      bool bearMtfTailwind = (ctx.mtf.higherBias == SIGNAL_SELL) || (ctx.mtf.higherBias == SIGNAL_NONE && ctx.mtf.intermediateBias == SIGNAL_SELL);
 
       bool bullBurst = (ctx.ticks.consecutiveUpTicks >= m_minConsecTicks &&
                         ctx.ticks.priceVelocity >= effMinVel &&
@@ -106,14 +113,16 @@ public:
                         ctx.ticks.microTrendBias >= 0.35 &&
                         ctx.ind.emaFast > ctx.ind.emaMedium &&
                         ctx.ind.emaMedium > ctx.ind.emaSlow &&
-                        ctx.mtf.higherBias != SIGNAL_SELL);
+                        ctx.ind.macdHist > 0.0 &&
+                        ctx.ind.rsi >= 48.0 && ctx.ind.rsi <= 70.0 &&
+                        bullMtfTailwind);
 
       if(bullBurst)
       {
          double slDist = ComputeStructuralSLDist(ctx, SIGNAL_BUY, effSlMult, effSlMult * 1.30);
-         double tpDist = MathMax(slDist * 1.40, ctx.ind.atr * effTpMult);
-         PopulateCommonSignal(outSignal, ctx, SIGNAL_BUY, slDist, tpDist, 0.74,
-                              "Bullish cost-validated tick velocity, EMA-stack & HTF burst",
+         double tpDist = MathMax(slDist * 1.45, ctx.ind.atr * effTpMult);
+         PopulateCommonSignal(outSignal, ctx, SIGNAL_BUY, slDist, tpDist, 0.76,
+                              "Bullish cost-validated tick velocity, EMA-stack & MTF burst",
                               StringFormat("UpTicks=%d, Vel=%.2f pts/s, Persist=%.2f, ADX=%.1f",
                                            ctx.ticks.consecutiveUpTicks, ctx.ticks.priceVelocity, ctx.ticks.directionalPersistence, ctx.ind.adxMain),
                               ctx.structure.summary, ctx.candle.name,
@@ -127,14 +136,16 @@ public:
                         ctx.ticks.microTrendBias <= -0.35 &&
                         ctx.ind.emaFast < ctx.ind.emaMedium &&
                         ctx.ind.emaMedium < ctx.ind.emaSlow &&
-                        ctx.mtf.higherBias != SIGNAL_BUY);
+                        ctx.ind.macdHist < 0.0 &&
+                        ctx.ind.rsi <= 52.0 && ctx.ind.rsi >= 30.0 &&
+                        bearMtfTailwind);
 
       if(bearBurst)
       {
          double slDist = ComputeStructuralSLDist(ctx, SIGNAL_SELL, effSlMult, effSlMult * 1.30);
-         double tpDist = MathMax(slDist * 1.40, ctx.ind.atr * effTpMult);
-         PopulateCommonSignal(outSignal, ctx, SIGNAL_SELL, slDist, tpDist, 0.74,
-                              "Bearish cost-validated tick velocity, EMA-stack & HTF burst",
+         double tpDist = MathMax(slDist * 1.45, ctx.ind.atr * effTpMult);
+         PopulateCommonSignal(outSignal, ctx, SIGNAL_SELL, slDist, tpDist, 0.76,
+                              "Bearish cost-validated tick velocity, EMA-stack & MTF burst",
                               StringFormat("DownTicks=%d, Vel=%.2f pts/s, Persist=%.2f, ADX=%.1f",
                                            ctx.ticks.consecutiveDownTicks, ctx.ticks.priceVelocity, ctx.ticks.directionalPersistence, ctx.ind.adxMain),
                               ctx.structure.summary, ctx.candle.name,
@@ -142,7 +153,7 @@ public:
          return true;
       }
 
-      outRejectReason = "Tick velocity/persistence/EMA-stack/HTF criteria not met";
+      outRejectReason = "Tick velocity/persistence/EMA-stack/MTF criteria not met";
       return false;
    }
 

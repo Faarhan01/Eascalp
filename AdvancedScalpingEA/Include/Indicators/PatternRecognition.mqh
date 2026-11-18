@@ -1,7 +1,7 @@
 //+------------------------------------------------------------------+
 //|                                           PatternRecognition.mqh |
 //|                        Advanced Multi-Market MT5 Scalping EA     |
-//|                        v2.0.0 Cached Swing-Based Pattern Engine  |
+//|                        v2.9.0 Cached Swing-Based Pattern Engine  |
 //+------------------------------------------------------------------+
 #ifndef __ASEA_INDICATORS_PATTERNRECOGNITION_MQH__
 #define __ASEA_INDICATORS_PATTERNRECOGNITION_MQH__
@@ -81,8 +81,9 @@ public:
 
    bool Analyze(const CMarketData &data, const ENUM_TIMEFRAMES tf, const double atr)
    {
-      SMarketSnapshot snap = data.GetSnapshot();
-      if(snap.dataReady && snap.barTime == m_lastAnalyzedBar)
+      if(!data.IsDataReady()) return false;
+      datetime barT = data.GetBarTime();
+      if(barT == m_lastAnalyzedBar)
          return true;
 
       m_signal.Reset();
@@ -98,7 +99,7 @@ public:
       ExtractSwings(rates, total, highs, hCount, lows, lCount);
       if(hCount < 2 || lCount < 2)
       {
-         m_lastAnalyzedBar = snap.barTime;
+         m_lastAnalyzedBar = barT;
          return true;
       }
 
@@ -112,41 +113,64 @@ public:
       if(hCount >= 3 && lCount >= 2)
       {
          double rightS = highs[0].price, head = highs[1].price, leftS = highs[2].price;
-         double neckline = MathMin(lows[0].price, lows[1].price);
          if(head > leftS + tol * 0.5 && head > rightS + tol * 0.5 &&
             MathAbs(leftS - rightS) <= tol * 1.2 &&
             (highs[2].barIndex - highs[0].barIndex) >= 12)
          {
-            m_signal.pattern = PATTERN_HEAD_SHOULDERS; m_signal.bias = SIGNAL_SELL;
-            m_signal.breakoutLevel = neckline; m_signal.invalidationLevel = rightS;
-            m_signal.confidence = (lastClose <= neckline) ? 0.88 : 0.68;
-            m_signal.name = "Head & Shoulders";
-            m_signal.note = StringFormat("Neckline %.5f | Right Shoulder %.5f", neckline, rightS);
-            m_lastAnalyzedBar = snap.barTime;
-            return true;
+            // Measure true neckline trough between right shoulder and left shoulder from bar history
+            double leftValley = rates[highs[1].barIndex].low;
+            for(int b = highs[1].barIndex; b <= highs[2].barIndex && b < total; b++)
+               if(rates[b].low < leftValley) leftValley = rates[b].low;
+            double rightValley = rates[highs[0].barIndex].low;
+            for(int b = highs[0].barIndex; b <= highs[1].barIndex && b < total; b++)
+               if(rates[b].low < rightValley) rightValley = rates[b].low;
+            double neckline = MathMin(leftValley, rightValley);
+            if((head - neckline) >= effAtr * 1.60)
+            {
+               m_signal.pattern = PATTERN_HEAD_SHOULDERS; m_signal.bias = SIGNAL_SELL;
+               m_signal.breakoutLevel = neckline; m_signal.invalidationLevel = rightS;
+               m_signal.confidence = (lastClose <= neckline) ? 0.88 : 0.68;
+               m_signal.name = "Head & Shoulders";
+               m_signal.note = StringFormat("Neckline %.5f | Right Shoulder %.5f", neckline, rightS);
+               m_lastAnalyzedBar = barT;
+               return true;
+            }
          }
       }
       if(lCount >= 3 && hCount >= 2)
       {
          double rightS = lows[0].price, head = lows[1].price, leftS = lows[2].price;
-         double neckline = MathMax(highs[0].price, highs[1].price);
          if(head < leftS - tol * 0.5 && head < rightS - tol * 0.5 &&
             MathAbs(leftS - rightS) <= tol * 1.2 &&
             (lows[2].barIndex - lows[0].barIndex) >= 12)
          {
-            m_signal.pattern = PATTERN_INV_HEAD_SHOULDERS; m_signal.bias = SIGNAL_BUY;
-            m_signal.breakoutLevel = neckline; m_signal.invalidationLevel = rightS;
-            m_signal.confidence = (lastClose >= neckline) ? 0.88 : 0.68;
-            m_signal.name = "Inverse Head & Shoulders";
-            m_signal.note = StringFormat("Neckline %.5f | Right Shoulder %.5f", neckline, rightS);
-            m_lastAnalyzedBar = snap.barTime;
-            return true;
+            // Measure true neckline peak between right shoulder and left shoulder from bar history
+            double leftPeak = rates[lows[1].barIndex].high;
+            for(int b = lows[1].barIndex; b <= lows[2].barIndex && b < total; b++)
+               if(rates[b].high > leftPeak) leftPeak = rates[b].high;
+            double rightPeak = rates[lows[0].barIndex].high;
+            for(int b = lows[0].barIndex; b <= lows[1].barIndex && b < total; b++)
+               if(rates[b].high > rightPeak) rightPeak = rates[b].high;
+            double neckline = MathMax(leftPeak, rightPeak);
+            if((neckline - head) >= effAtr * 1.60)
+            {
+               m_signal.pattern = PATTERN_INV_HEAD_SHOULDERS; m_signal.bias = SIGNAL_BUY;
+               m_signal.breakoutLevel = neckline; m_signal.invalidationLevel = rightS;
+               m_signal.confidence = (lastClose >= neckline) ? 0.88 : 0.68;
+               m_signal.name = "Inverse Head & Shoulders";
+               m_signal.note = StringFormat("Neckline %.5f | Right Shoulder %.5f", neckline, rightS);
+               m_lastAnalyzedBar = barT;
+               return true;
+            }
          }
       }
 
       if(MathAbs(h1 - h2) <= tol && (highs[1].barIndex - highs[0].barIndex) >= 6)
       {
-         double valley = l1;
+         // Scan bars strictly between the two swing highs for genuine intervening valley
+         double valley = rates[highs[0].barIndex].low;
+         for(int b = highs[0].barIndex; b <= highs[1].barIndex && b < total; b++)
+            if(rates[b].low < valley) valley = rates[b].low;
          if((MathMax(h1, h2) - valley) >= effAtr * 1.5)
          {
             m_signal.pattern = PATTERN_DOUBLE_TOP; m_signal.bias = SIGNAL_SELL;
@@ -154,13 +178,16 @@ public:
             m_signal.confidence = (lastClose < valley) ? 0.85 : 0.65;
             m_signal.name = "Double Top";
             m_signal.note = StringFormat("Peaks ~%.5f | Neck %.5f", (h1 + h2) * 0.5, valley);
-            m_lastAnalyzedBar = snap.barTime;
+            m_lastAnalyzedBar = barT;
             return true;
          }
       }
       if(MathAbs(l1 - l2) <= tol && (lows[1].barIndex - lows[0].barIndex) >= 6)
       {
-         double peak = h1;
+         // Scan bars strictly between the two swing lows for genuine intervening peak
+         double peak = rates[lows[0].barIndex].high;
+         for(int b = lows[0].barIndex; b <= lows[1].barIndex && b < total; b++)
+            if(rates[b].high > peak) peak = rates[b].high;
          if((peak - MathMin(l1, l2)) >= effAtr * 1.5)
          {
             m_signal.pattern = PATTERN_DOUBLE_BOTTOM; m_signal.bias = SIGNAL_BUY;
@@ -168,7 +195,7 @@ public:
             m_signal.confidence = (lastClose > peak) ? 0.85 : 0.65;
             m_signal.name = "Double Bottom";
             m_signal.note = StringFormat("Troughs ~%.5f | Neck %.5f", (l1 + l2) * 0.5, peak);
-            m_lastAnalyzedBar = snap.barTime;
+            m_lastAnalyzedBar = barT;
             return true;
          }
       }
@@ -261,7 +288,7 @@ public:
          m_signal.confidence = 0.72; m_signal.name = "Rectangle Range"; m_signal.note = "Horizontal range";
       }
 
-      m_lastAnalyzedBar = snap.barTime;
+      m_lastAnalyzedBar = barT;
       return true;
    }
 

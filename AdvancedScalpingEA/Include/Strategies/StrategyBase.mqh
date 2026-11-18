@@ -1,7 +1,7 @@
 //+------------------------------------------------------------------+
 //|                                                 StrategyBase.mqh |
 //|                        Advanced Multi-Market MT5 Scalping EA     |
-//|                        v2.0.0 Independent Strategy Interface     |
+//|                        v2.9.0 Independent Strategy Interface     |
 //+------------------------------------------------------------------+
 #ifndef __ASEA_STRATEGIES_STRATEGYBASE_MQH__
 #define __ASEA_STRATEGIES_STRATEGYBASE_MQH__
@@ -36,6 +36,7 @@ protected:
    string           m_name;
    bool             m_enabled;
    bool             m_autoAdaptBySymbol;
+   bool             m_snapTpBeforeWalls;
    double           m_slAtrMult;
    double           m_tpAtrMult;
    int              m_minSampleSize;
@@ -48,9 +49,19 @@ protected:
    double           m_cumProfit;
    double           m_totalHoldSec;
 
+   double NormalizePriceTick(const SSymbolProfile &prof, const double price) const
+   {
+      if(price <= 0.0) return 0.0;
+      double out = price;
+      if(prof.tickSize > 0.0)
+         out = MathRound(out / prof.tickSize) * prof.tickSize;
+      int dg = (prof.digits >= 0) ? prof.digits : 5;
+      return NormalizeDouble(out, dg);
+   }
+
    double EnsureMinStop(const SSymbolProfile &prof, const double entry, const double sl, const ENUM_SIGNAL_DIRECTION dir) const
    {
-      double minStop = MathMax((double)(prof.stopsLevelPoints + 4) * prof.point, prof.tickSize * 5.0);
+      double minStop = MathMax((double)(MathMax(prof.stopsLevelPoints, prof.freezeLevelPoints) + 4) * prof.point, prof.tickSize * 5.0);
       if(dir == SIGNAL_BUY)
       {
          if((entry - sl) < minStop) return entry - minStop;
@@ -106,6 +117,53 @@ protected:
       return MathMax(minStop, MathMin(maxDist, structDist));
    }
 
+   double ApplyStructuralTargetSnap(const SAnalysisContext &ctx, const ENUM_SIGNAL_DIRECTION dir,
+                                    const double entryPrice, const double actualSlDist,
+                                    const double rawTpDist, const double minStop) const
+   {
+      if(!m_snapTpBeforeWalls || !ctx.structure.isReady || ctx.ind.atr <= 0.0 || entryPrice <= 0.0)
+         return rawTpDist;
+
+      double minRewardFloor = MathMax(minStop, actualSlDist * 1.40);
+      if(rawTpDist <= minRewardFloor)
+         return rawTpDist;
+
+      double wallPad = MathMax(ctx.ind.atr * 0.15, (ctx.market.spreadPoints + 3.0) * ctx.symbolProfile.point);
+      double snappedDist = rawTpDist;
+
+      if(dir == SIGNAL_BUY)
+      {
+         if(ctx.structure.nearestResistance > entryPrice && ctx.structure.resistanceRejectCount >= 2)
+         {
+            double cand = (ctx.structure.nearestResistance - wallPad) - entryPrice;
+            if(cand >= minRewardFloor && cand < snappedDist)
+               snappedDist = cand;
+         }
+         if(ctx.structure.prevDayHigh > entryPrice)
+         {
+            double cand = (ctx.structure.prevDayHigh - wallPad) - entryPrice;
+            if(cand >= minRewardFloor && cand < snappedDist)
+               snappedDist = cand;
+         }
+      }
+      else if(dir == SIGNAL_SELL)
+      {
+         if(ctx.structure.nearestSupport > 0.0 && ctx.structure.nearestSupport < entryPrice && ctx.structure.supportRejectCount >= 2)
+         {
+            double cand = entryPrice - (ctx.structure.nearestSupport + wallPad);
+            if(cand >= minRewardFloor && cand < snappedDist)
+               snappedDist = cand;
+         }
+         if(ctx.structure.prevDayLow > 0.0 && ctx.structure.prevDayLow < entryPrice)
+         {
+            double cand = entryPrice - (ctx.structure.prevDayLow + wallPad);
+            if(cand >= minRewardFloor && cand < snappedDist)
+               snappedDist = cand;
+         }
+      }
+      return MathMax(minStop, snappedDist);
+   }
+
    void PopulateCommonSignal(STradeSignal &sig, const SAnalysisContext &ctx, const ENUM_SIGNAL_DIRECTION dir,
                              const double slDist, const double tpDist, const double rawConf,
                              const string rationale, const string supInd, const string supStruct,
@@ -118,14 +176,19 @@ protected:
       sig.strategyId   = m_id;
       sig.strategyName = m_name;
       sig.direction    = dir;
-      sig.entryPrice   = (dir == SIGNAL_BUY) ? ctx.market.ask : ctx.market.bid;
+      sig.entryPrice   = NormalizePriceTick(ctx.symbolProfile, (dir == SIGNAL_BUY) ? ctx.market.ask : ctx.market.bid);
 
       double sl = (dir == SIGNAL_BUY) ? (sig.entryPrice - slDist) : (sig.entryPrice + slDist);
       sl = EnsureMinStop(ctx.symbolProfile, sig.entryPrice, sl, dir);
-      double minStop = MathMax((double)(MathMax(ctx.symbolProfile.stopsLevelPoints, ctx.symbolProfile.freezeLevelPoints) + 4) * ctx.symbolProfile.point,
-                               ctx.symbolProfile.tickSize * 5.0);
-      double effTpDist = MathMax(tpDist, minStop);
-      double tp = (dir == SIGNAL_BUY) ? (sig.entryPrice + effTpDist) : (sig.entryPrice - effTpDist);
+      sl = NormalizePriceTick(ctx.symbolProfile, sl);
+
+      double actualSlDist = MathAbs(sig.entryPrice - sl);
+      double targetRR     = (slDist > 0.0 && tpDist > 0.0) ? MathMax(1.30, tpDist / slDist) : 1.50;
+      double minStop      = MathMax((double)(MathMax(ctx.symbolProfile.stopsLevelPoints, ctx.symbolProfile.freezeLevelPoints) + 4) * ctx.symbolProfile.point,
+                                    ctx.symbolProfile.tickSize * 5.0);
+      double effTpDist    = MathMax(MathMax(tpDist, minStop), actualSlDist * targetRR);
+      effTpDist           = ApplyStructuralTargetSnap(ctx, dir, sig.entryPrice, actualSlDist, effTpDist, minStop);
+      double tp           = NormalizePriceTick(ctx.symbolProfile, (dir == SIGNAL_BUY) ? (sig.entryPrice + effTpDist) : (sig.entryPrice - effTpDist));
 
       sig.stopLoss      = sl;
       sig.takeProfit    = tp;
@@ -148,6 +211,7 @@ public:
       m_name = name;
       m_enabled = true;
       m_autoAdaptBySymbol = true;
+      m_snapTpBeforeWalls = true;
       m_slAtrMult = 1.60;
       m_tpAtrMult = 2.80;
       m_minSampleSize = 20;
@@ -165,6 +229,7 @@ public:
    virtual ~CStrategyBase() {}
 
    void SetAutoAdaptBySymbol(const bool autoAdapt) { m_autoAdaptBySymbol = autoAdapt; }
+   void SetSnapTpBeforeWalls(const bool snapTp)    { m_snapTpBeforeWalls = snapTp; }
 
    double GetEffectiveSlMult(const SAnalysisContext &ctx, const double stratScale = 1.0) const
    {

@@ -1,7 +1,7 @@
 //+------------------------------------------------------------------+
 //|                                                    CSVLogger.mqh |
 //|                        Advanced Multi-Market MT5 Scalping EA     |
-//|                        v2.0.0 Buffered 12-File CSV Exporter      |
+//|                        v2.9.0 Buffered 12-File CSV Exporter      |
 //+------------------------------------------------------------------+
 #ifndef __ASEA_ANALYTICS_CSVLOGGER_MQH__
 #define __ASEA_ANALYTICS_CSVLOGGER_MQH__
@@ -101,7 +101,7 @@ public:
       m_isTester = (MQLInfoInteger(MQL_TESTER) != 0);
       m_flushBatchSize = m_isTester ? MathMax(200, MathMin(500, batchSize * 10)) : MathMax(1, MathMin(100, batchSize));
       m_diag = diag;
-      m_lastFlushTime = (TimeCurrent() > 0) ? TimeCurrent() : TimeLocal();
+      m_lastFlushTime = SafeCurrentTime();
 
       if(m_enabled)
       {
@@ -151,6 +151,7 @@ public:
 
    void LogObservation(const SMarketSnapshot &m, const SIndicatorValues &ind, const SRegimeState &reg, const SStructureState &st)
    {
+      if(!m_enabled) return;
       string row = StringFormat("%s,%s,%s,%.5f,%.5f,%.1f,%.1f,%.5f,%.2f,%.2f,%.5f,%.2f,%.1f,%s,%d",
                                 TimeToString(m.tickTime, TIME_DATE | TIME_SECONDS), m.symbol, EnumToString(m.timeframe),
                                 m.bid, m.ask, m.spreadPoints, m.avgSpreadPoints, ind.atr, ind.rsi, ind.adxMain,
@@ -160,6 +161,7 @@ public:
 
    void LogTickAnalysis(const string sym, const datetime t, const STickMetrics &tk)
    {
+      if(!m_enabled) return;
       string row = StringFormat("%s,%s,%d,%d,%d,%.3f,%.2f,%.2f,%.2f,%.3f,%.2f,%.2f,%d,%d",
                                 TimeToString(t, TIME_DATE | TIME_SECONDS), sym, tk.sampleCount,
                                 tk.consecutiveUpTicks, tk.consecutiveDownTicks, tk.directionalPersistence, tk.ticksPerSecond,
@@ -170,6 +172,7 @@ public:
 
    void LogRegime(const string sym, const ENUM_TIMEFRAMES tf, const datetime t, const SRegimeState &reg)
    {
+      if(!m_enabled) return;
       string row = StringFormat("%s,%s,%s,%s,%.2f,%d,%.2f,%.2f,%.3f,%d,%d,%d",
                                 TimeToString(t, TIME_DATE | TIME_SECONDS), sym, EnumToString(tf),
                                 CleanCSV(reg.label), reg.confidence, (int)reg.volatilityState, reg.trendStrength,
@@ -180,6 +183,7 @@ public:
 
    void LogPatterns(const string sym, const ENUM_TIMEFRAMES tf, const datetime t, const SCandleSignal &c, const SChartPatternSignal &p)
    {
+      if(!m_enabled) return;
       if(c.pattern == CANDLE_NONE && p.pattern == PATTERN_NONE) return;
       string row = StringFormat("%s,%s,%s,%s,%s,%d,%s,%s,%.2f,%.5f,%s",
                                 TimeToString(t, TIME_DATE | TIME_SECONDS), sym, EnumToString(tf),
@@ -190,6 +194,7 @@ public:
 
    void LogAcceptedSignal(const STradeSignal &s, const string splitTag)
    {
+      if(!m_enabled) return;
       string row = StringFormat("%s,%s,%s,%s,%s,%s,%.1f,%d,%s,%s,%.5f,%.5f,%.5f,%.2f,%.2f,%.2f,%s,%s,%s,%s",
                                 TimeToString(s.timestamp, TIME_DATE | TIME_SECONDS), s.signalId, s.symbol,
                                 EnumToString(s.timeframe), CleanCSV(s.strategyName), DirectionToString(s.direction),
@@ -205,8 +210,9 @@ public:
                           const ENUM_SIGNAL_DIRECTION dir, const double score, const ENUM_MARKET_REGIME reg,
                           const string code, const string reason)
    {
+      if(!m_enabled) return;
       string row = StringFormat("%s,%s,%s,%s,%s,%.1f,%s,%s,%s",
-                                TimeToString(TimeCurrent(), TIME_DATE | TIME_SECONDS), sym, EnumToString(tf),
+                                TimeToString(SafeCurrentTime(), TIME_DATE | TIME_SECONDS), sym, EnumToString(tf),
                                 CleanCSV(stratName), DirectionToString(dir), score, CleanCSV(RegimeToString(reg)),
                                 CleanCSV(code), CleanCSV(reason));
       AppendBuffered(5, row);
@@ -219,8 +225,9 @@ public:
                                  const double netPnL, const double mfeMoney, const double maeMoney,
                                  const long holdSec, const string splitTag)
    {
+      if(!m_enabled) return;
       string row = StringFormat("%s,%I64u,%s,%s,%s,%s,%s,%.2f,%.5f,%.5f,%.5f,%.1f,%.2f,%.1f,%s,%s,%s,%.2f,%.2f,%.2f,%I64d,%s",
-                                TimeToString(TimeCurrent(), TIME_DATE | TIME_SECONDS), ticket, CleanCSV(signalId), sym, EnumToString(tf),
+                                TimeToString(SafeCurrentTime(), TIME_DATE | TIME_SECONDS), ticket, CleanCSV(signalId), sym, EnumToString(tf),
                                 CleanCSV(stratName), DirectionToString(dir), vol, entry, sl, tp, slipPts, execCost, score,
                                 CleanCSV(RegimeToString(reg)), CleanCSV(status), CleanCSV(exitReason),
                                 netPnL, mfeMoney, maeMoney, holdSec, splitTag);
@@ -229,8 +236,9 @@ public:
 
    void LogStrategyPerformanceSnapshot(const string sym, const SStrategyStats &st)
    {
+      if(!m_enabled) return;
       string row = StringFormat("%s,%s,%s,%d,%s,%d,%d,%d,%.2f,%.2f,%.2f,%.2f,%.2f,%.1f,%d,%d",
-                                TimeToString(TimeCurrent(), TIME_DATE | TIME_SECONDS), sym, CleanCSV(st.strategyName),
+                                TimeToString(SafeCurrentTime(), TIME_DATE | TIME_SECONDS), sym, CleanCSV(st.strategyName),
                                 st.enabledByInput ? 1 : 0, CleanCSV(SuitabilityToString(st.suitability)),
                                 st.totalTrades, st.winningTrades, st.losingTrades,
                                 st.winRatePct, st.netProfit, st.profitFactor, st.expectedValue, st.maxDrawdownMoney,
@@ -240,8 +248,9 @@ public:
 
    void LogRiskEvent(const string sym, const string eventType, const SRiskStatus &rk, const string details)
    {
+      if(!m_enabled) return;
       string row = StringFormat("%s,%s,%s,%s,%.2f,%.2f,%.2f,%.2f,%.2f,%s,%.2f,%d,%s",
-                                TimeToString(TimeCurrent(), TIME_DATE | TIME_SECONDS), sym, CleanCSV(eventType),
+                                TimeToString(SafeCurrentTime(), TIME_DATE | TIME_SECONDS), sym, CleanCSV(eventType),
                                 CleanCSV(rk.statusLabel), rk.dailyPnL, rk.weeklyPnL, rk.balanceDrawdownPct,
                                 rk.equityDrawdownPct, rk.currentOpenRiskPct, rk.topExposedCurrency,
                                 rk.maxCurrencyExposureLots, rk.consecutiveLosses, CleanCSV(details));
@@ -250,6 +259,7 @@ public:
 
    void LogLearningProposal(const SLearningProposal &p)
    {
+      if(!m_enabled) return;
       if(p.timestamp <= 0) return;
       string row = StringFormat("%s,%s,%s,%s,%s,%d",
                                 TimeToString(p.timestamp, TIME_DATE | TIME_SECONDS), CleanCSV(p.strategyName),
@@ -261,8 +271,9 @@ public:
    void LogConfiguration(const string sym, const ENUM_TIMEFRAMES tf, const ENUM_EA_OPERATING_MODE mode,
                          const double riskPct, const double minScore, const double maxSpread, const string label)
    {
+      if(!m_enabled) return;
       string row = StringFormat("%s,%s,%s,%s,%.2f,%.1f,%.1f,%s",
-                                TimeToString(TimeCurrent(), TIME_DATE | TIME_SECONDS), sym, EnumToString(tf),
+                                TimeToString(SafeCurrentTime(), TIME_DATE | TIME_SECONDS), sym, EnumToString(tf),
                                 OperatingModeToString(mode), riskPct, minScore, maxSpread, CleanCSV(label));
       AppendBuffered(10, row);
       FlushFile(10);
@@ -270,8 +281,9 @@ public:
 
    void LogSessionSummary(const string sym, const SAccountMetrics &acc, const SIntelligenceSummary &intel)
    {
+      if(!m_enabled) return;
       string row = StringFormat("%s,%s,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%d,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%I64d,%I64d,%I64d,%I64d",
-                                TimeToString(TimeCurrent(), TIME_DATE | TIME_SECONDS), sym, acc.balance, acc.equity,
+                                TimeToString(SafeCurrentTime(), TIME_DATE | TIME_SECONDS), sym, acc.balance, acc.equity,
                                 acc.floatingPnL, acc.totalNetProfit, acc.totalCommissions, acc.totalSwaps,
                                 acc.totalTrades, acc.winRatePct, acc.profitFactor, acc.maxDrawdownPct,
                                 acc.avgMfeMoney, acc.avgMaeMoney, acc.sharpeRatio, acc.sortinoRatio,
@@ -282,7 +294,7 @@ public:
    void FlushAll(const bool force = false)
    {
       if(!m_enabled) return;
-      datetime now = (TimeCurrent() > 0) ? TimeCurrent() : TimeLocal();
+      datetime now = SafeCurrentTime();
       int flushSec = m_isTester ? 3600 : 30;
       if(!force && (now - m_lastFlushTime) < flushSec) return;
       for(int i = 0; i < ASEA_CSV_FILE_COUNT; i++)

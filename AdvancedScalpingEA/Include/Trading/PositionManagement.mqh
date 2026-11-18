@@ -1,7 +1,7 @@
 //+------------------------------------------------------------------+
 //|                                           PositionManagement.mqh |
 //|                        Advanced Multi-Market MT5 Scalping EA     |
-//|                        v2.2.0 MFE/MAE, Cost-BE & Chandelier Trail|
+//|                        v2.9.0 MFE/MAE, Cost-BE & Chandelier Trail|
 //+------------------------------------------------------------------+
 #ifndef __ASEA_TRADING_POSITIONMANAGEMENT_MQH__
 #define __ASEA_TRADING_POSITIONMANAGEMENT_MQH__
@@ -17,18 +17,23 @@ struct SPosMgmtConfig
    bool   enableBreakEven;
    double breakEvenTriggerAtr;
    double breakEvenLockAtr;
+   double breakEvenCostPaddingMult;
    bool   enablePartialClose;
    double partialCloseTriggerAtr;
    double partialCloseFraction;
+   bool   moveToBeOnPartialClose;
    bool   enableTrailingStop;
    bool   useProgressiveTrail;
    bool   useChandelierTrail;
+   bool   trailAlongStructureSwings;
+   bool   tightenTrailNearMaxHold;
    double trailingStartAtr;
    double trailingStepAtr;
    bool   enableStructureExit;
    bool   enableMomentumExit;
    bool   enableStrategyExit;
    bool   enableOppositeSignalExit;
+   double oppositeSignalMinScore;
    bool   enableMaxHoldExit;
    int    maxHoldingMinutes;
    bool   closeBeforeWeekend;
@@ -39,18 +44,23 @@ struct SPosMgmtConfig
       enableBreakEven = true;
       breakEvenTriggerAtr = 1.45;
       breakEvenLockAtr = 0.15;
+      breakEvenCostPaddingMult = 1.25;
       enablePartialClose = true;
       partialCloseTriggerAtr = 1.90;
       partialCloseFraction = 0.40;
+      moveToBeOnPartialClose = true;
       enableTrailingStop = true;
       useProgressiveTrail = true;
       useChandelierTrail = true;
+      trailAlongStructureSwings = true;
+      tightenTrailNearMaxHold = true;
       trailingStartAtr = 2.00;
       trailingStepAtr = 1.00;
       enableStructureExit = true;
       enableMomentumExit = false;
       enableStrategyExit = true;
       enableOppositeSignalExit = false;
+      oppositeSignalMinScore = 74.0;
       enableMaxHoldExit = true;
       maxHoldingMinutes = 180;
       closeBeforeWeekend = false;
@@ -99,7 +109,9 @@ private:
       int idx = StringFind(cmt, "|S");
       if(idx >= 0)
       {
-         int sid = (int)StringToInteger(StringSubstr(cmt, idx + 2, 1));
+         int secondBar = StringFind(cmt, "|", idx + 2);
+         int len = (secondBar > idx + 2) ? (secondBar - (idx + 2)) : 2;
+         int sid = (int)StringToInteger(StringSubstr(cmt, idx + 2, len));
          if(sid >= 0 && sid < EA_MAX_STRATEGIES)
             return (ENUM_STRATEGY_ID)sid;
       }
@@ -232,10 +244,16 @@ public:
    void RefreshOwnedPositions(const string activeSymbol, const CSymbolIntelligence &activeSymIntel)
    {
       int total = PositionsTotal();
-      ArrayResize(m_positions, MathMax(1, total));
+      if(total == 0)
+      {
+         m_posCount = 0;
+         return;
+      }
+      if(total > ArraySize(m_positions))
+         ArrayResize(m_positions, total);
       m_posCount = 0;
 
-      datetime now = TimeCurrent();
+      datetime now = SafeCurrentTime();
       for(int i = 0; i < total; i++)
       {
          ulong ticket = PositionGetTicket(i);
@@ -321,7 +339,6 @@ public:
 
          m_positions[m_posCount++] = p;
       }
-      ArrayResize(m_positions, m_posCount);
    }
 
    void ManageSymbolPositions(const string sym, const SAnalysisContext &ctx, const STradeSignal &latestSignal,
@@ -329,6 +346,13 @@ public:
                               const int stratCount, CTradeExecution &exec, const bool autoAdaptBySymbol = true)
    {
       if(m_posCount <= 0 || !ctx.market.dataReady) return;
+
+      bool hasSymPos = false;
+      for(int i = 0; i < m_posCount; i++)
+      {
+         if(m_positions[i].symbol == sym) { hasSymPos = true; break; }
+      }
+      if(!hasSymPos) return;
 
       SSymbolProfile prof = symIntel.GetProfile();
       SAdaptiveAssetProfile ap = symIntel.GetAdaptiveAssetProfile();
@@ -342,12 +366,12 @@ public:
                       ? ctx.ind.atr
                       : (ctx.market.spreadPoints * prof.point * 6.0);
       double minStopDist = symIntel.GetMinStopDistancePrice();
-      datetime now = TimeCurrent();
+      datetime now = SafeCurrentTime();
 
-      // Compute cost-covering break-even price buffer (commission distance + modest 25% spread slippage cushion; entry spread is already in openPrice)
+      // Compute cost-covering break-even price buffer scaled by configured cost padding multiplier
       double lossPerPt = symIntel.GetLossPerLotForPriceDistance(prof.point);
       double commPts   = (lossPerPt > 0.0 && prof.estCommissionPerLot > 0.0) ? (prof.estCommissionPerLot / lossPerPt) : 0.0;
-      double costBeBuf = (ctx.market.spreadPoints * 0.25 + commPts + 2.0) * prof.point;
+      double costBeBuf = ((ctx.market.spreadPoints * 0.25 + commPts + 2.0) * MathMax(1.0, m_cfg.breakEvenCostPaddingMult)) * prof.point;
 
       int tfMinutes = MathMax(1, PeriodSeconds(ctx.market.timeframe) / 60);
       long effMaxHoldMin = (tfMinutes > 5)
@@ -361,8 +385,8 @@ public:
 
       for(int i = 0; i < m_posCount; i++)
       {
+         if(m_positions[i].symbol != sym) continue;
          SManagedPosition p = m_positions[i];
-         if(p.symbol != sym) continue;
 
          long holdMin = (long)(now - p.openTime) / 60;
          int tIdx = FindTrackIndex(p.ticket);
@@ -404,7 +428,7 @@ public:
          // 3. Opposite strong signal exit (current bar only to avoid stale cached signal triggers)
          if(m_cfg.enableOppositeSignalExit && latestSignal.isValid &&
             latestSignal.timestamp >= ctx.market.barTime &&
-            latestSignal.compositeScore >= 72.0 &&
+            latestSignal.compositeScore >= m_cfg.oppositeSignalMinScore &&
             latestSignal.direction != SIGNAL_NONE && latestSignal.direction != p.direction)
          {
             string rsn = "Opposite high-score signal";
@@ -472,9 +496,14 @@ public:
             }
          }
 
-         // 6. Partial profit scaling (guarded against un-splittable min-lots and premature BE)
+         // 6. Partial profit scaling (guarded against premature pre-1.0R trigger and un-splittable min-lots)
+         double initSlDist = (p.initialSL > 0.0) ? MathAbs(p.openPrice - p.initialSL) : 0.0;
+         double effBeTrigger   = (initSlDist > 0.0) ? MathMax(effAtr * effBeTrigMult, initSlDist * 1.00)   : (effAtr * effBeTrigMult);
+         double effPartTrigger = (initSlDist > 0.0) ? MathMax(effAtr * effPartTrigMult, initSlDist * 1.10) : (effAtr * effPartTrigMult);
+         double effTrailTrigger= (initSlDist > 0.0) ? MathMax(effAtr * effTrailStart, initSlDist * 1.15)   : (effAtr * effTrailStart);
+
          bool triggerImmediateBE = false;
-         if(m_cfg.enablePartialClose && !p.partialExitTaken && profitDist >= effAtr * effPartTrigMult)
+         if(m_cfg.enablePartialClose && !p.partialExitTaken && profitDist >= effPartTrigger)
          {
             double partVol = symIntel.NormalizeVolume(p.volume * MathMax(0.20, MathMin(0.75, effPartFrac)));
             if(p.volume >= prof.volumeMin * 2.0 && partVol >= prof.volumeMin && (p.volume - partVol) >= prof.volumeMin)
@@ -483,7 +512,7 @@ public:
                {
                   if(tIdx >= 0) m_tracks[tIdx].partialExitTaken = true;
                   p.partialExitTaken = true;
-                  triggerImmediateBE = true;
+                  if(m_cfg.moveToBeOnPartialClose) triggerImmediateBE = true;
                }
             }
             else
@@ -491,7 +520,7 @@ public:
                // Un-splittable minimum lot size: suppress repeat checks and advance SL to BE instead
                if(tIdx >= 0) m_tracks[tIdx].partialExitTaken = true;
                p.partialExitTaken = true;
-               triggerImmediateBE = true;
+               if(m_cfg.moveToBeOnPartialClose) triggerImmediateBE = true;
             }
          }
 
@@ -508,11 +537,11 @@ public:
             if(profitAtr >= 3.5)      progMult = 0.60;
             else if(profitAtr >= 2.5) progMult = 0.78;
          }
-
-         double initSlDist = (p.initialSL > 0.0) ? MathAbs(p.openPrice - p.initialSL) : 0.0;
-         double effBeTrigger = (initSlDist > 0.0)
-                               ? MathMax(effAtr * effBeTrigMult, initSlDist * 1.00)
-                               : (effAtr * effBeTrigMult);
+         if(m_cfg.tightenTrailNearMaxHold && m_cfg.enableMaxHoldExit && effMaxHoldMin > 0 &&
+            holdMin >= (long)(effMaxHoldMin * 0.70) && profitDist > effAtr * 0.40)
+         {
+            progMult *= 0.70;
+         }
 
          if(p.direction == SIGNAL_BUY)
          {
@@ -523,14 +552,22 @@ public:
                if(beSL <= ctx.market.bid - minStopDist && (newSL <= 0.0 || beSL > newSL))
                   newSL = beSL;
             }
-            if(m_cfg.enableTrailingStop && profitDist >= effAtr * effTrailStart)
+            if(m_cfg.enableTrailingStop && profitDist >= effTrailTrigger)
             {
                double anchor = m_cfg.useChandelierTrail ? MathMax(bestFav, ctx.market.bid) : ctx.market.bid;
                double trailSL = anchor - effAtr * effTrailStep * volTrailMult * progMult;
+               if(m_cfg.trailAlongStructureSwings && ctx.structure.isReady &&
+                  ctx.structure.lastSwingLow > p.openPrice + costBeBuf && ctx.structure.lastSwingLow < ctx.market.bid)
+               {
+                  double swingSL = ctx.structure.lastSwingLow - effAtr * 0.25;
+                  if(swingSL <= ctx.market.bid - minStopDist && swingSL > trailSL)
+                     trailSL = swingSL;
+               }
                if(trailSL <= ctx.market.bid - minStopDist && (newSL <= 0.0 || trailSL > newSL))
                   newSL = trailSL;
             }
-            if(newSL > 0.0 && (p.currentSL <= 0.0 || newSL > p.currentSL + prof.point))
+            double priceStep = MathMax(prof.point, prof.tickSize);
+            if(newSL > 0.0 && (p.currentSL <= 0.0 || newSL > p.currentSL + priceStep * 0.5))
                exec.ModifyPositionStops(p.ticket, newSL, p.takeProfit, symIntel);
          }
          else if(p.direction == SIGNAL_SELL)
@@ -542,17 +579,50 @@ public:
                if(beSL >= ctx.market.ask + minStopDist && (newSL <= 0.0 || beSL < newSL))
                   newSL = beSL;
             }
-            if(m_cfg.enableTrailingStop && profitDist >= effAtr * effTrailStart)
+            if(m_cfg.enableTrailingStop && profitDist >= effTrailTrigger)
             {
                double anchor = m_cfg.useChandelierTrail ? MathMin(bestFav, ctx.market.ask) : ctx.market.ask;
                double trailSL = anchor + effAtr * effTrailStep * volTrailMult * progMult;
+               if(m_cfg.trailAlongStructureSwings && ctx.structure.isReady &&
+                  ctx.structure.lastSwingHigh > 0.0 && ctx.structure.lastSwingHigh < p.openPrice - costBeBuf &&
+                  ctx.structure.lastSwingHigh > ctx.market.ask)
+               {
+                  double swingSL = ctx.structure.lastSwingHigh + effAtr * 0.25;
+                  if(swingSL >= ctx.market.ask + minStopDist && swingSL < trailSL)
+                     trailSL = swingSL;
+               }
                if(trailSL >= ctx.market.ask + minStopDist && (newSL <= 0.0 || trailSL < newSL))
                   newSL = trailSL;
             }
-            if(newSL > 0.0 && (p.currentSL <= 0.0 || newSL < p.currentSL - prof.point))
+            double priceStep = MathMax(prof.point, prof.tickSize);
+            if(newSL > 0.0 && (p.currentSL <= 0.0 || newSL < p.currentSL - priceStep * 0.5))
                exec.ModifyPositionStops(p.ticket, newSL, p.takeProfit, symIntel);
          }
       }
+   }
+
+   bool HandleOppositeSignalExit(const string sym, const SAnalysisContext &ctx, const STradeSignal &freshSignal,
+                                 const CSymbolIntelligence &symIntel, CTradeExecution &exec)
+   {
+      if(!m_cfg.enableOppositeSignalExit || m_posCount <= 0 || !ctx.market.dataReady) return false;
+      if(!freshSignal.isValid || freshSignal.direction == SIGNAL_NONE) return false;
+      if(freshSignal.compositeScore < m_cfg.oppositeSignalMinScore) return false;
+      if(ctx.regime.isUnstable) return false;
+
+      bool anyClosed = false;
+      for(int i = 0; i < m_posCount; i++)
+      {
+         SManagedPosition p = m_positions[i];
+         if(p.symbol != sym) continue;
+         if(p.direction != freshSignal.direction)
+         {
+            string rsn = StringFormat("Opposite strong signal (%.1f)", freshSignal.compositeScore);
+            SetExitReason(p.ticket, rsn);
+            if(exec.ClosePosition(p.ticket, p.symbol, rsn, symIntel))
+               anyClosed = true;
+         }
+      }
+      return anyClosed;
    }
 
    int GetManagedPositions(SManagedPosition &outArr[]) const

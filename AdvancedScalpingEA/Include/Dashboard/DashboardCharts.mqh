@@ -1,10 +1,10 @@
 //+------------------------------------------------------------------+
 //|                                              DashboardCharts.mqh |
 //|                        Advanced Multi-Market MT5 Scalping EA     |
-//|                        v2.0.0 CCanvas Analytics Visualizations   |
+//|                        v2.9.0 CCanvas Analytics Visualizations   |
 //+------------------------------------------------------------------+
-#ifndef __ASEA_DASHBOARD_CHARTS_MQH__
-#define __ASEA_DASHBOARD_CHARTS_MQH__
+#ifndef __ASEA_DASHBOARD_DASHBOARDCHARTS_MQH__
+#define __ASEA_DASHBOARD_DASHBOARDCHARTS_MQH__
 
 #include <Canvas\Canvas.mqh>
 #include "../Core/Types.mqh"
@@ -161,13 +161,13 @@ public:
          m_canvas.TextOut(6, padT - 4, "+" + DoubleToString(maxAbs, 0), ColorToARGB(ASEA_CLR_TEXT_MUTED, 255));
          m_canvas.TextOut(6, padT + plotH - 10, "-" + DoubleToString(maxAbs, 0), ColorToARGB(ASEA_CLR_TEXT_MUTED, 255));
 
-         int slotW = MathMax(24, plotW / stratCount);
-         int barW = MathMax(14, slotW - 18);
-         int maxLblChars = MathMax(5, (slotW - 6) / 7);
+         int slotW = MathMax(20, plotW / stratCount);
+         int barW = MathMax(10, slotW - 14);
+         int maxLblChars = MathMax(4, (slotW - 4) / 7);
 
          for(int i = 0; i < stratCount; i++)
          {
-            int bx = padL + i * slotW + 9;
+            int bx = padL + i * slotW + 7;
             double np = stratStats[i].netProfit;
             int barH = (int)((MathAbs(np) / maxAbs) * (plotH / 2 - 6));
             if(barH < 2 && stratStats[i].totalTrades > 0) barH = 2;
@@ -251,4 +251,4 @@ public:
    }
 };
 
-#endif // __ASEA_DASHBOARD_CHARTS_MQH__
+#endif // __ASEA_DASHBOARD_DASHBOARDCHARTS_MQH__

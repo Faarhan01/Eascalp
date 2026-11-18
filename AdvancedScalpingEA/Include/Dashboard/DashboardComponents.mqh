@@ -1,10 +1,10 @@
 //+------------------------------------------------------------------+
 //|                                          DashboardComponents.mqh |
 //|                        Advanced Multi-Market MT5 Scalping EA     |
-//|                        Native MQL5 Dark Terminal UI Primitives   |
+//|                        v2.9.0 Dark Terminal UI Primitives      |
 //+------------------------------------------------------------------+
-#ifndef __ASEA_DASHBOARD_COMPONENTS_MQH__
-#define __ASEA_DASHBOARD_COMPONENTS_MQH__
+#ifndef __ASEA_DASHBOARD_DASHBOARDCOMPONENTS_MQH__
+#define __ASEA_DASHBOARD_DASHBOARDCOMPONENTS_MQH__
 
 #define ASEA_UI_PREFIX "ASEA_RO_"
 
@@ -102,4 +102,4 @@ public:
    }
 };
 
-#endif // __ASEA_DASHBOARD_COMPONENTS_MQH__
+#endif // __ASEA_DASHBOARD_DASHBOARDCOMPONENTS_MQH__

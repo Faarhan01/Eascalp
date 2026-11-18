@@ -1,7 +1,7 @@
 //+------------------------------------------------------------------+
 //|                                           HistoricalResearch.mqh |
 //|                        Advanced Multi-Market MT5 Scalping EA     |
-//|                        v2.0.0 OOS, Walk-Forward, MC & ScoreBands |
+//|                        v2.9.0 OOS, Walk-Forward, MC & ScoreBands |
 //+------------------------------------------------------------------+
 #ifndef __ASEA_INTELLIGENCE_HISTORICALRESEARCH_MQH__
 #define __ASEA_INTELLIGENCE_HISTORICALRESEARCH_MQH__
@@ -29,6 +29,14 @@ private:
    int      m_bandWins[3];
    double   m_bandNetPnL[3];
 
+   // Cached Monte Carlo result & pre-allocated work arrays
+   double   m_mcSamples[];
+   double   m_mcShuffled[];
+   int      m_cachedMcTradeCount;
+   int      m_cachedMcIters;
+   double   m_cachedMcMedDD;
+   double   m_cachedMcP95DD;
+
 public:
    CHistoricalResearch()
    {
@@ -36,7 +44,13 @@ public:
       m_walkForwardDays = 14;
       m_oosSplitRatio = 0.30;
       m_tradeCount = 0;
+      m_cachedMcTradeCount = -1;
+      m_cachedMcIters = 0;
+      m_cachedMcMedDD = 0.0;
+      m_cachedMcP95DD = 0.0;
       ArrayResize(m_tradePnLs, 0);
+      ArrayResize(m_mcSamples, 0);
+      ArrayResize(m_mcShuffled, 0);
       ArrayInitialize(m_bandTrades, 0);
       ArrayInitialize(m_bandWins, 0);
       ArrayInitialize(m_bandNetPnL, 0.0);
@@ -44,10 +58,14 @@ public:
 
    void Initialize(const int walkForwardDays, const double oosRatio)
    {
-      m_sessionStart = TimeCurrent();
+      m_sessionStart = SafeCurrentTime();
       m_walkForwardDays = MathMax(3, walkForwardDays);
       m_oosSplitRatio = MathMax(0.10, MathMin(0.50, oosRatio));
       m_tradeCount = 0;
+      m_cachedMcTradeCount = -1;
+      m_cachedMcIters = 0;
+      m_cachedMcMedDD = 0.0;
+      m_cachedMcP95DD = 0.0;
       ArrayResize(m_tradePnLs, 0);
       ArrayInitialize(m_bandTrades, 0);
       ArrayInitialize(m_bandWins, 0);
@@ -61,6 +79,7 @@ public:
          ArrayResize(m_tradePnLs, idx + 64);
       m_tradePnLs[idx] = pnl;
       m_tradeCount++;
+      m_cachedMcTradeCount = -1; // Invalidate cached Monte Carlo quantiles
 
       if(signalScore >= 0.0)
       {
@@ -97,49 +116,60 @@ public:
       return info;
    }
 
-   bool RunMonteCarloDrawdown95(const int iterations, double &outMedianMaxDD, double &outP95MaxDD) const
+   bool RunMonteCarloDrawdown95(const int iterations, double &outMedianMaxDD, double &outP95MaxDD)
    {
       outMedianMaxDD = 0.0;
       outP95MaxDD = 0.0;
       if(m_tradeCount < 15) return false;
 
       int iters = MathMax(50, MathMin(500, iterations));
-      double ddSamples[];
-      ArrayResize(ddSamples, iters);
+      if(m_cachedMcTradeCount == m_tradeCount && m_cachedMcIters == iters)
+      {
+         outMedianMaxDD = m_cachedMcMedDD;
+         outP95MaxDD = m_cachedMcP95DD;
+         return true;
+      }
 
-      double shuffled[];
-      ArrayResize(shuffled, m_tradeCount);
+      if(ArraySize(m_mcSamples) < iters)
+         ArrayResize(m_mcSamples, iters);
+      if(ArraySize(m_mcShuffled) < m_tradeCount)
+         ArrayResize(m_mcShuffled, m_tradeCount);
+
       uint rng = 2463534242U;
-
       for(int it = 0; it < iters; it++)
       {
-         for(int i = 0; i < m_tradeCount; i++) shuffled[i] = m_tradePnLs[i];
+         for(int i = 0; i < m_tradeCount; i++) m_mcShuffled[i] = m_tradePnLs[i];
          for(int i = m_tradeCount - 1; i > 0; i--)
          {
             rng ^= (rng << 13);
             rng ^= (rng >> 17);
             rng ^= (rng << 5);
             int j = (int)(rng % (uint)(i + 1));
-            double tmp = shuffled[i];
-            shuffled[i] = shuffled[j];
-            shuffled[j] = tmp;
+            double tmp = m_mcShuffled[i];
+            m_mcShuffled[i] = m_mcShuffled[j];
+            m_mcShuffled[j] = tmp;
          }
 
          double eq = 0.0, peak = 0.0, maxDD = 0.0;
          for(int i = 0; i < m_tradeCount; i++)
          {
-            eq += shuffled[i];
+            eq += m_mcShuffled[i];
             if(eq > peak) peak = eq;
             double dd = peak - eq;
             if(dd > maxDD) maxDD = dd;
          }
-         ddSamples[it] = maxDD;
+         m_mcSamples[it] = maxDD;
       }
 
-      ArraySort(ddSamples);
-      outMedianMaxDD = ddSamples[iters / 2];
+      ArraySort(m_mcSamples, 0, iters);
+      m_cachedMcMedDD = m_mcSamples[iters / 2];
       int p95Idx = (int)MathMin(iters - 1, MathFloor(0.95 * iters));
-      outP95MaxDD = ddSamples[p95Idx];
+      m_cachedMcP95DD = m_mcSamples[p95Idx];
+      m_cachedMcTradeCount = m_tradeCount;
+      m_cachedMcIters = iters;
+
+      outMedianMaxDD = m_cachedMcMedDD;
+      outP95MaxDD = m_cachedMcP95DD;
       return true;
    }
 

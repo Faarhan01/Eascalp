@@ -1,7 +1,7 @@
 //+------------------------------------------------------------------+
 //|                                                 TickAnalysis.mqh |
 //|                        Advanced Multi-Market MT5 Scalping EA     |
-//|                        v2.0.0 Cost-Aware Tick Intelligence       |
+//|                        v2.9.0 Cost-Aware Tick Intelligence       |
 //+------------------------------------------------------------------+
 #ifndef __ASEA_MARKET_TICKANALYSIS_MQH__
 #define __ASEA_MARKET_TICKANALYSIS_MQH__
@@ -24,6 +24,7 @@ private:
    string               m_symbol;
    CSymbolIntelligence *m_symIntel;
    STickSample          m_buffer[];
+   double               m_deltas[];
    int                  m_capacity;
    int                  m_count;
    int                  m_head;
@@ -60,6 +61,7 @@ public:
       m_symIntel = symIntel;
       m_capacity = MathMax(16, MathMin(256, tickWindow));
       ArrayResize(m_buffer, m_capacity);
+      ArrayResize(m_deltas, m_capacity);
       m_count = 0;
       m_head = 0;
       m_prevVelocity = 0.0;
@@ -68,11 +70,13 @@ public:
       m_metrics.Reset();
 
       MqlTick hist[];
-      int copied = CopyTicks(m_symbol, hist, COPY_TICKS_INFO, 0, MathMin(m_capacity, 32));
-      if(copied > 0)
+      datetime curT = SafeCurrentTime();
+      ulong fromMsc = (curT > 180) ? (ulong)(curT - 180) * 1000 : 0;
+      int copied = CopyTicks(m_symbol, hist, COPY_TICKS_INFO, fromMsc, MathMin(m_capacity, 32));
+      if(copied > 0 && m_symIntel != NULL)
       {
-         SSymbolProfile prof = m_symIntel.GetProfile();
-         double pt = (prof.point > 0.0) ? prof.point : 0.00001;
+         double rawPt = m_symIntel.GetPoint();
+         double pt = (rawPt > 0.0) ? rawPt : 0.00001;
          for(int i = 0; i < copied; i++)
          {
             if(hist[i].bid <= 0.0 || hist[i].ask <= 0.0) continue;
@@ -100,19 +104,28 @@ public:
    void OnTickUpdate(const SMarketSnapshot &market)
    {
       if(!market.dataReady || m_symIntel == NULL) return;
-      MqlTick t;
-      if(!SymbolInfoTick(m_symbol, t)) return;
-      if(t.bid <= 0.0 || t.ask <= 0.0) return;
-
-      SSymbolProfile prof = m_symIntel.GetProfile();
-      double pt = (prof.point > 0.0) ? prof.point : 0.00001;
 
       STickSample s;
-      s.timeMsc = t.time_msc;
-      s.bid = t.bid;
-      s.ask = t.ask;
-      s.mid = (t.bid + t.ask) * 0.5;
-      s.spreadPoints = (t.ask - t.bid) / pt;
+      if(market.tickTimeMsc > 0 && market.bid > 0.0 && market.ask > 0.0)
+      {
+         s.timeMsc      = market.tickTimeMsc;
+         s.bid          = market.bid;
+         s.ask          = market.ask;
+         s.mid          = market.midPrice;
+         s.spreadPoints = market.spreadPoints;
+      }
+      else
+      {
+         MqlTick t;
+         if(!SymbolInfoTick(m_symbol, t) || t.bid <= 0.0 || t.ask <= 0.0) return;
+         double rawPt = m_symIntel.GetPoint();
+         double pt = (rawPt > 0.0) ? rawPt : 0.00001;
+         s.timeMsc      = t.time_msc;
+         s.bid          = t.bid;
+         s.ask          = t.ask;
+         s.mid          = (t.bid + t.ask) * 0.5;
+         s.spreadPoints = (t.ask - t.bid) / pt;
+      }
 
       if(m_count > 0)
       {
@@ -138,9 +151,10 @@ public:
          return;
       }
 
-      SSymbolProfile prof = m_symIntel.GetProfile();
-      double pt = (prof.point > 0.0) ? prof.point : 0.00001;
-      double pipPts = (prof.pipSize > 0.0) ? MathMax(1.0, prof.pipSize / pt) : 1.0;
+      double rawPt  = m_symIntel.GetPoint();
+      double pt     = (rawPt > 0.0) ? rawPt : 0.00001;
+      double pipSz  = m_symIntel.GetPipSize();
+      double pipPts = (pipSz > 0.0) ? MathMax(1.0, pipSz / pt) : 1.0;
 
       int firstIdx = GetIndexFromOldest(0);
       int lastIdx  = GetIndexFromOldest(m_count - 1);
@@ -156,8 +170,8 @@ public:
       double recentVel = ((m_buffer[lastIdx].mid - m_buffer[midIdx].mid) / pt) / recentSec;
       double accel = (recentVel - m_prevVelocity) / recentSec;
       double velThreshold = MathMax(0.20, pipPts * 0.12);
-      bool velSlowing = (MathAbs(recentVel) < MathAbs(m_prevVelocity) * 0.75) && (MathAbs(m_prevVelocity) > velThreshold);
-      m_prevVelocity = recentVel;
+      bool velSlowing = (recentSec >= 0.15) && (MathAbs(recentVel) < MathAbs(m_prevVelocity) * 0.72) && (MathAbs(m_prevVelocity) > velThreshold);
+      m_prevVelocity = (MathAbs(m_prevVelocity) < 1e-9) ? recentVel : (0.65 * recentVel + 0.35 * m_prevVelocity);
 
       // Consecutive direction runs
       int upRun = 0, downRun = 0;
@@ -170,9 +184,10 @@ public:
          else if(d < 0.0) { if(upRun > 0) break; downRun++; }
       }
 
-      // Tick-to-tick deltas for persistence & short-term tick volatility
-      double deltas[];
-      ArrayResize(deltas, m_count - 1);
+      // Tick-to-tick deltas for persistence & short-term tick volatility (zero per-tick heap resize)
+      int deltaCount = m_count - 1;
+      if(deltaCount > ArraySize(m_deltas))
+         ArrayResize(m_deltas, deltaCount);
       int upSteps = 0, downSteps = 0;
       double sumDelta = 0.0, sumSpread = 0.0;
       for(int k = 1; k < m_count; k++)
@@ -180,18 +195,18 @@ public:
          int cur = GetIndexFromOldest(k);
          int prv = GetIndexFromOldest(k - 1);
          double dPts = (m_buffer[cur].mid - m_buffer[prv].mid) / pt;
-         deltas[k - 1] = dPts;
+         m_deltas[k - 1] = dPts;
          sumDelta += dPts;
          if(dPts > 0.0) upSteps++;
          else if(dPts < 0.0) downSteps++;
          sumSpread += m_buffer[cur].spreadPoints;
       }
 
-      double meanDelta = sumDelta / (double)(m_count - 1);
+      double meanDelta = sumDelta / (double)deltaCount;
       double varSum = 0.0;
-      for(int k = 0; k < m_count - 1; k++)
+      for(int k = 0; k < deltaCount; k++)
       {
-         double diff = deltas[k] - meanDelta;
+         double diff = m_deltas[k] - meanDelta;
          varSum += diff * diff;
       }
       double tickStdDevPts = MathSqrt(varSum / (double)MathMax(1, m_count - 2));
@@ -203,7 +218,7 @@ public:
       double bidDelta = (m_buffer[lastIdx].bid - m_buffer[midIdx].bid) / pt;
       double askDelta = (m_buffer[lastIdx].ask - m_buffer[midIdx].ask) / pt;
       double curSpread = m_buffer[lastIdx].spreadPoints;
-      double refSpread = (m_avgSpreadPoints > 0.0) ? m_avgSpreadPoints : (sumSpread / MathMax(1, m_count - 1));
+      double refSpread = (m_avgSpreadPoints > 0.0) ? m_avgSpreadPoints : (sumSpread / MathMax(1, deltaCount));
       double spreadExp = (refSpread > 0.0) ? (curSpread / refSpread) : 1.0;
 
       m_metrics.consecutiveUpTicks     = upRun;

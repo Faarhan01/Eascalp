@@ -1,7 +1,7 @@
 //+------------------------------------------------------------------+
 //|                                                SymbolContext.mqh |
 //|                        Advanced Multi-Market MT5 Scalping EA     |
-//|                        v2.0.0 Isolated Per-Symbol Analysis Unit  |
+//|                        v2.9.0 Isolated Per-Symbol Analysis Unit  |
 //+------------------------------------------------------------------+
 #ifndef __ASEA_CORE_SYMBOLCONTEXT_MQH__
 #define __ASEA_CORE_SYMBOLCONTEXT_MQH__
@@ -28,7 +28,11 @@ private:
    bool                 m_autoAdaptBySymbol;
    datetime             m_lastBarObsLogged;
    datetime             m_lastSymRefresh;
+   datetime             m_lastFullSyncBar;
+   bool                 m_profileDirty;
+   bool                 m_lastUnstableSynced;
    double               m_lastAtr;
+   int                  m_histCalibBarsSince;
 
    CSymbolIntelligence  m_symIntel;
    CMarketData          m_marketData;
@@ -53,7 +57,11 @@ public:
       m_autoAdaptBySymbol = true;
       m_lastBarObsLogged = 0;
       m_lastSymRefresh = 0;
+      m_lastFullSyncBar = 0;
+      m_profileDirty = true;
+      m_lastUnstableSynced = false;
       m_lastAtr = 0.0;
+      m_histCalibBarsSince = 0;
       m_ctx.Reset();
       m_lastSignal.Reset();
       m_lastValidation.Reset();
@@ -79,7 +87,9 @@ public:
                    const double spreadUnstable, const double dojiBodyMax, const double pinWickMin,
                    const int patternLookback, const double patternTolAtr,
                    const double wHtf, const double wItf, const double wLtf,
-                   const bool autoAdaptBySymbol, CDiagnostics *diag)
+                   const bool autoAdaptBySymbol, CDiagnostics *diag,
+                   const ENUM_ASSET_CLASS_OVERRIDE assetOverride = ASSET_OVERRIDE_AUTO,
+                   const bool autoTuneFromHistory = true)
    {
       Release();
       m_symbol = symbol;
@@ -87,12 +97,16 @@ public:
       m_autoAdaptBySymbol = autoAdaptBySymbol;
       m_lastBarObsLogged = 0;
       m_lastSymRefresh = 0;
+      m_lastFullSyncBar = 0;
+      m_profileDirty = true;
+      m_lastUnstableSynced = false;
       m_lastAtr = 0.0;
+      m_histCalibBarsSince = 0;
       m_ctx.Reset();
       m_lastSignal.Reset();
       m_lastValidation.Reset();
 
-      if(!m_symIntel.Initialize(m_symbol, m_primaryTF, fallbackCommPerLot, diag))
+      if(!m_symIntel.Initialize(m_symbol, m_primaryTF, fallbackCommPerLot, diag, assetOverride, autoTuneFromHistory))
          return false;
 
       SAdaptiveAssetProfile ap = m_symIntel.GetAdaptiveAssetProfile();
@@ -112,6 +126,36 @@ public:
       m_candles.Configure(dojiBodyMax, pinWickMin);
       m_patterns.Configure(patternLookback, swingStrength, patternTolAtr);
 
+      // Seed empirical microstructure & Step Index detection immediately if bars are already cached
+      MqlRates initRates[];
+      if(m_marketData.CopyAvailableClosedRates(m_primaryTF, 20, 50, initRates))
+      {
+         int nInit = ArraySize(initRates);
+         double trSum = 0.0;
+         int trCount = MathMin(20, nInit - 1);
+         for(int b = 0; b < trCount; b++)
+         {
+            double prevClose = initRates[b + 1].close;
+            double tr = MathMax(initRates[b].high - initRates[b].low,
+                                MathMax(MathAbs(initRates[b].high - prevClose), MathAbs(initRates[b].low - prevClose)));
+            trSum += tr;
+         }
+         double initAtr = (trCount > 0) ? (trSum / (double)trCount) : 0.0;
+         if(initAtr > 0.0)
+         {
+            m_lastAtr = initAtr;
+            SMarketSnapshot initSnap = m_marketData.GetSnapshot();
+            m_symIntel.UpdateDynamicBaselines(initAtr, initSnap.avgSpreadPoints);
+            m_symIntel.CalibrateFromHistory(initRates, nInit, initAtr);
+            if(m_autoAdaptBySymbol)
+            {
+               SAdaptiveAssetProfile apCal = m_symIntel.GetAdaptiveAssetProfile();
+               m_regime.Configure(apCal.adxStrongThresh, apCal.adxWeakThresh,
+                                  apCal.volHighRatio, apCal.volLowRatio, apCal.spreadUnstableRatio);
+            }
+         }
+      }
+
       m_initialized = true;
       return true;
    }
@@ -121,13 +165,14 @@ public:
       outIsNewBar = false;
       if(!m_initialized) return false;
 
-      datetime now = TimeCurrent();
+      datetime now = SafeCurrentTime();
       const int baseRefreshSec = (MQLInfoInteger(MQL_TESTER) != 0) ? 1800 : 300;
-      const int symRefreshSec  = !m_ctx.symbolProfile.sessionOpenNow ? MathMin(baseRefreshSec, 30) : baseRefreshSec;
+      const int symRefreshSec  = !m_symIntel.IsSessionOpenNow() ? MathMin(baseRefreshSec, 30) : baseRefreshSec;
       if(refreshSymSpecs || m_lastSymRefresh == 0 || (now - m_lastSymRefresh) >= symRefreshSec)
       {
          m_symIntel.Refresh(m_primaryTF);
          m_lastSymRefresh = now;
+         m_profileDirty = true;
       }
 
       if(!m_marketData.Update(m_lastAtr))
@@ -136,43 +181,90 @@ public:
          return false;
       }
 
-      SMarketSnapshot market = m_marketData.GetSnapshot();
-      m_tickAnalysis.OnTickUpdate(market);
+      // Copy live market snapshot ONCE into m_ctx.market and pass by reference to TickAnalysis
+      m_ctx.market = m_marketData.GetSnapshot();
+      m_tickAnalysis.OnTickUpdate(m_ctx.market);
+      m_ctx.ticks = m_tickAnalysis.GetMetrics();
+
       outIsNewBar = m_marketData.IsNewClosedBar();
+      datetime curBarT = m_ctx.market.barTime;
+      bool needFullSync = (m_profileDirty || outIsNewBar || curBarT != m_lastFullSyncBar);
+
       if(outIsNewBar)
          m_symIntel.RefreshAvailableBars(m_primaryTF);
 
-      SSymbolProfile prof = m_symIntel.GetProfile();
-      m_indEngine.Update(m_marketData, prof.hasRealVolume);
-      SIndicatorValues ind = m_indEngine.GetValues();
-      if(ind.isReady && ind.atr > 0.0)
-      {
-         m_lastAtr = ind.atr;
-         m_symIntel.UpdateDynamicBaselines(ind.atrBaseline, market.avgSpreadPoints);
-         prof = m_symIntel.GetProfile();
-      }
+      m_indEngine.Update(m_marketData, m_symIntel.HasRealVolume());
 
-      STickMetrics ticks = m_tickAnalysis.GetMetrics();
-      if(ind.isReady)
+      if(needFullSync)
       {
-         m_structure.Analyze(m_marketData, m_primaryTF, ind.atr);
-         m_candles.Analyze(m_marketData, m_primaryTF, ind, m_structure.GetState());
-         m_patterns.Analyze(m_marketData, m_primaryTF, ind.atr);
-         double pipPts = (prof.point > 0.0 && prof.pipSize > 0.0) ? MathMax(1.0, prof.pipSize / prof.point) : 1.0;
-         m_regime.Classify(m_marketData, m_primaryTF, ind, m_structure.GetState(), ticks, pipPts);
-         m_mtf.Evaluate(m_marketData, ind, m_structure.GetState());
-      }
+         SIndicatorValues ind = m_indEngine.GetValues();
+         if(ind.isReady && ind.atr > 0.0)
+         {
+            m_lastAtr = ind.atr;
+            m_symIntel.UpdateDynamicBaselines(ind.atrBaseline, m_ctx.market.avgSpreadPoints);
+            if(outIsNewBar) m_histCalibBarsSince++;
+            if(!m_symIntel.IsEmpiricalProfileReady() || m_histCalibBarsSince >= 20)
+            {
+               MqlRates histRates[];
+               if(m_marketData.CopyAvailableClosedRates(m_primaryTF, 20, 50, histRates))
+               {
+                  bool prevStep = m_symIntel.IsStepIndex();
+                  m_symIntel.CalibrateFromHistory(histRates, ArraySize(histRates), ind.atr);
+                  m_histCalibBarsSince = 0;
+                  if(m_autoAdaptBySymbol && (prevStep != m_symIntel.IsStepIndex() || m_symIntel.IsEmpiricalProfileReady()))
+                  {
+                     SAdaptiveAssetProfile apNow = m_symIntel.GetAdaptiveAssetProfile();
+                     m_regime.Configure(apNow.adxStrongThresh, apNow.adxWeakThresh,
+                                        apNow.volHighRatio, apNow.volLowRatio, apNow.spreadUnstableRatio);
+                  }
+               }
+            }
+            m_structure.Analyze(m_marketData, m_primaryTF, ind.atr);
+            m_candles.Analyze(m_marketData, m_primaryTF, ind, m_structure.GetState());
+            m_patterns.Analyze(m_marketData, m_primaryTF, ind.atr);
+            double pt = m_symIntel.GetPoint();
+            double pipSz = m_symIntel.GetPipSize();
+            double pipPts = (pt > 0.0 && pipSz > 0.0) ? MathMax(1.0, pipSz / pt) : 1.0;
+            m_regime.Classify(m_marketData, m_primaryTF, ind, m_structure.GetState(), m_ctx.ticks, pipPts);
+            m_mtf.Evaluate(m_marketData, ind, m_structure.GetState());
 
-      m_ctx.symbolProfile = prof;
-      m_ctx.assetProfile  = m_symIntel.GetAdaptiveAssetProfile();
-      m_ctx.market        = market;
-      m_ctx.ticks         = ticks;
-      m_ctx.ind           = ind;
-      m_ctx.structure     = m_structure.GetState();
-      m_ctx.candle        = m_candles.GetSignal();
-      m_ctx.chartPattern  = m_patterns.GetSignal();
-      m_ctx.regime        = m_regime.GetState();
-      m_ctx.mtf           = m_mtf.GetAnalysis();
+            m_ctx.symbolProfile = m_symIntel.GetProfile();
+            m_ctx.assetProfile  = m_symIntel.GetAdaptiveAssetProfile();
+            m_ctx.ind           = ind;
+            m_ctx.structure     = m_structure.GetState();
+            m_ctx.candle        = m_candles.GetSignal();
+            m_ctx.chartPattern  = m_patterns.GetSignal();
+            m_ctx.regime        = m_regime.GetState();
+            m_ctx.mtf           = m_mtf.GetAnalysis();
+            m_lastFullSyncBar   = curBarT;
+            m_profileDirty      = false;
+            m_lastUnstableSynced = m_ctx.regime.isUnstable;
+         }
+         else
+         {
+            m_ctx.symbolProfile = m_symIntel.GetProfile();
+            m_ctx.assetProfile  = m_symIntel.GetAdaptiveAssetProfile();
+            m_ctx.ind           = ind;
+         }
+      }
+      else if(m_ctx.ind.isReady)
+      {
+         // Intra-bar lightweight overlay update: only touch regime/mtf if overlay toggled or MTF wasn't ready
+         double pt = m_symIntel.GetPoint();
+         double pipSz = m_symIntel.GetPipSize();
+         double pipPts = (pt > 0.0 && pipSz > 0.0) ? MathMax(1.0, pipSz / pt) : 1.0;
+         m_regime.Classify(m_marketData, m_primaryTF, m_ctx.ind, m_ctx.structure, m_ctx.ticks, pipPts);
+         if(m_regime.IsUnstable() != m_lastUnstableSynced)
+         {
+            m_ctx.regime = m_regime.GetState();
+            m_lastUnstableSynced = m_ctx.regime.isUnstable;
+         }
+         if(!m_ctx.mtf.isReady)
+         {
+            if(m_mtf.Evaluate(m_marketData, m_ctx.ind, m_ctx.structure))
+               m_ctx.mtf = m_mtf.GetAnalysis();
+         }
+      }
       return true;
    }
 
@@ -194,6 +286,12 @@ public:
 
    string                   GetSymbol() const         { return m_symbol; }
    bool                     IsInitialized() const     { return m_initialized; }
+   bool                     IsMarketReady() const     { return m_ctx.market.dataReady; }
+   bool                     IsIndReady() const        { return m_ctx.ind.isReady; }
+   bool                     IsTicksReady() const      { return m_ctx.ticks.isReady; }
+   bool                     IsTickSurge() const       { return m_ctx.ticks.suddenActivitySurge; }
+   datetime                 GetBarTime() const        { return m_ctx.market.barTime; }
+   datetime                 GetTickTime() const       { return m_ctx.market.tickTime; }
    const CSymbolIntelligence *GetSymbolIntelPtr() const { return GetPointer(m_symIntel); }
    SAnalysisContext         GetContext() const        { return m_ctx; }
    STradeSignal             GetLastSignal() const     { return m_lastSignal; }

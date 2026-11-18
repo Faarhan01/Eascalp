@@ -1,7 +1,7 @@
 //+------------------------------------------------------------------+
 //|                                               RiskManagement.mqh |
 //|                        Advanced Multi-Market MT5 Scalping EA     |
-//|                        v2.0.0 Portfolio & Currency Risk Engine   |
+//|                        v2.9.0 Portfolio & Currency Risk Engine   |
 //+------------------------------------------------------------------+
 #ifndef __ASEA_TRADING_RISKMANAGEMENT_MQH__
 #define __ASEA_TRADING_RISKMANAGEMENT_MQH__
@@ -18,6 +18,9 @@ struct SRiskConfig
    double maxDailyLossPct;
    double maxWeeklyLossPct;
    double maxAccountDrawdownPct;
+   double maxDailyProfitTargetPct;
+   double dailyProfitProtectArmPct;
+   double dailyProfitGivebackPct;
    int    maxConsecutiveLosses;
    int    maxOpenPositionsTotal;
    int    maxOpenPositionsPerSymbol;
@@ -28,6 +31,9 @@ struct SRiskConfig
    double minFreeMarginMoney;
    bool   allowMinLotFallback;
    double maxMinLotRiskPct;
+   bool   scaleRiskBySignalScore;
+   bool   reduceRiskOnLossStreak;
+   bool   reduceRiskInHighVolatility;
    bool   emergencyStopAllNewEntries;
 
    void ResetDefaults()
@@ -38,9 +44,12 @@ struct SRiskConfig
       maxDailyLossPct = 2.50;
       maxWeeklyLossPct = 6.00;
       maxAccountDrawdownPct = 10.00;
+      maxDailyProfitTargetPct = 0.00;
+      dailyProfitProtectArmPct = 0.00;
+      dailyProfitGivebackPct = 45.0;
       maxConsecutiveLosses = 5;
       maxOpenPositionsTotal = 4;
-      maxOpenPositionsPerSymbol = 2;
+      maxOpenPositionsPerSymbol = 1;
       maxAggregateLots = 5.0;
       maxSymbolLots = 2.0;
       maxCurrencyExposureLots = 2.5;
@@ -48,6 +57,9 @@ struct SRiskConfig
       minFreeMarginMoney = 5.0;
       allowMinLotFallback = true;
       maxMinLotRiskPct = 3.00;
+      scaleRiskBySignalScore = true;
+      reduceRiskOnLossStreak = true;
+      reduceRiskInHighVolatility = true;
       emergencyStopAllNewEntries = false;
    }
 };
@@ -69,6 +81,7 @@ private:
    double            m_weekStartBalance;
    double            m_peakBalance;
    double            m_peakEquity;
+   double            m_dayPeakProfitMoney;
 
    datetime GetDayStart(const datetime t) const
    {
@@ -133,8 +146,9 @@ public:
       m_currencyExpCount = 0;
       m_activeSymbolLots = 0.0;
       m_dayAnchor = 0; m_weekAnchor = 0;
-      m_dayStartBalance = 0.0; m_weekStartBalance = 0.0;
+      m_dayStartBalance  = 0.0; m_weekStartBalance = 0.0;
       m_peakBalance = 0.0; m_peakEquity = 0.0;
+      m_dayPeakProfitMoney = 0.0;
    }
 
    void Initialize(const long magic, const SRiskConfig &cfg, CDiagnostics *diag)
@@ -148,13 +162,14 @@ public:
 
       double bal = AccountInfoDouble(ACCOUNT_BALANCE);
       double eq  = AccountInfoDouble(ACCOUNT_EQUITY);
-      datetime now = TimeCurrent();
+      datetime now = SafeCurrentTime();
       m_dayAnchor  = GetDayStart(now);
       m_weekAnchor = GetWeekStart(now);
       m_dayStartBalance  = bal;
       m_weekStartBalance = bal;
       m_peakBalance = bal;
       m_peakEquity  = MathMax(bal, eq);
+      m_dayPeakProfitMoney = MathMax(0.0, eq - bal);
       m_status.maxConsecutiveLosses = 0;
    }
 
@@ -192,7 +207,7 @@ public:
 
    void Update(const string activeSymbol, const SManagedPosition &managedPositions[], const int managedCount)
    {
-      datetime now = TimeCurrent();
+      datetime now = SafeCurrentTime();
       datetime curDay = GetDayStart(now);
       datetime curWeek = GetWeekStart(now);
 
@@ -207,7 +222,10 @@ public:
          bool firstInit = (m_dayAnchor == 0);
          m_dayAnchor = curDay;
          if(!firstInit || m_dayStartBalance <= 0.0)
+         {
             m_dayStartBalance = bal;
+            m_dayPeakProfitMoney = 0.0;
+         }
          if(!firstInit && m_status.lockoutActive)
          {
             if(StringFind(m_status.lockoutReason, "Daily") >= 0)
@@ -241,6 +259,8 @@ public:
 
       m_status.dailyPnL  = eq - m_dayStartBalance;
       m_status.weeklyPnL = eq - m_weekStartBalance;
+      if(m_status.dailyPnL > m_dayPeakProfitMoney)
+         m_dayPeakProfitMoney = m_status.dailyPnL;
       m_status.dailyLossLimitMoney  = m_dayStartBalance * (m_cfg.maxDailyLossPct / 100.0);
       m_status.weeklyLossLimitMoney = m_weekStartBalance * (m_cfg.maxWeeklyLossPct / 100.0);
 
@@ -316,6 +336,23 @@ public:
          m_status.lockoutActive = true;
          m_status.lockoutReason = StringFormat("Daily loss limit reached (%.2f)", m_status.dailyPnL);
       }
+      else if(m_cfg.maxDailyProfitTargetPct > 0.0 && m_dayStartBalance > 0.0 &&
+              m_status.dailyPnL >= m_dayStartBalance * (m_cfg.maxDailyProfitTargetPct / 100.0))
+      {
+         m_status.lockoutActive = true;
+         m_status.lockoutReason = StringFormat("Daily profit target locked (+%.2f >= %.2f%%)", m_status.dailyPnL, m_cfg.maxDailyProfitTargetPct);
+      }
+      else if(m_cfg.dailyProfitProtectArmPct > 0.0 && m_cfg.dailyProfitGivebackPct > 0.0 &&
+              m_dayStartBalance > 0.0 &&
+              m_dayPeakProfitMoney >= m_dayStartBalance * (m_cfg.dailyProfitProtectArmPct / 100.0))
+      {
+         double minRetainedProfit = m_dayPeakProfitMoney * MathMax(0.0, 1.0 - (m_cfg.dailyProfitGivebackPct / 100.0));
+         if(m_status.dailyPnL <= minRetainedProfit)
+         {
+            m_status.lockoutActive = true;
+            m_status.lockoutReason = StringFormat("Daily profit guard locked (Peak +%.2f -> %.2f)", m_dayPeakProfitMoney, m_status.dailyPnL);
+         }
+      }
       else if(m_status.weeklyLossLimitMoney > 0.0 && (-m_status.weeklyPnL) >= m_status.weeklyLossLimitMoney)
       {
          m_status.lockoutActive = true;
@@ -358,7 +395,10 @@ public:
       }
       else
       {
-         m_status.statusLabel = "NOMINAL";
+         bool guardArmed = (m_cfg.dailyProfitProtectArmPct > 0.0 && m_cfg.dailyProfitGivebackPct > 0.0 &&
+                            m_dayStartBalance > 0.0 &&
+                            m_dayPeakProfitMoney >= m_dayStartBalance * (m_cfg.dailyProfitProtectArmPct / 100.0));
+         m_status.statusLabel = guardArmed ? "NOMINAL (PROFIT GUARD ARMED)" : "NOMINAL";
       }
    }
 
@@ -372,7 +412,8 @@ public:
       return 0.0;
    }
 
-   double CalculateFixedFractionalVolume(const STradeSignal &sig, const CSymbolIntelligence &symIntel, string &outReason) const
+   double CalculateFixedFractionalVolume(const STradeSignal &sig, const CSymbolIntelligence &symIntel, string &outReason,
+                                         const ENUM_VOLATILITY_STATE volState = VOL_NORMAL, const double volRatio = 1.0) const
    {
       outReason = "";
       if(m_status.lockoutActive || !m_status.tradingAllowed)
@@ -410,6 +451,23 @@ public:
          return 0.0;
       }
 
+      // Quality-conviction risk scaling (bounded cleanly within [0.80..1.25] and hard maxRiskPerTradePct)
+      if(m_cfg.scaleRiskBySignalScore && sig.isValid)
+      {
+         double scoreMult = 0.85 + MathMax(0.0, sig.compositeScore - 55.0) * 0.012 + ((sig.consensusCount >= 2) ? 0.10 : 0.0);
+         scoreMult = MathMax(0.80, MathMin(1.25, scoreMult));
+         effRiskPct = MathMin(m_cfg.maxRiskPerTradePct, effRiskPct * scoreMult);
+      }
+
+      // Volatility-regime risk damper: trim sizing during sudden volatility spikes
+      if(m_cfg.reduceRiskInHighVolatility)
+      {
+         if(volState == VOL_ABNORMAL || volRatio >= 2.25)
+            effRiskPct *= 0.65;
+         else if(volState == VOL_HIGH && volRatio >= 1.70)
+            effRiskPct *= 0.80;
+      }
+
       // Anti-Martingale drawdown & losing-streak risk scaling to contain drawdown
       double ddScale = 1.0;
       if(m_status.equityDrawdownPct >= 6.5)      ddScale = 0.35;
@@ -417,9 +475,12 @@ public:
       else if(m_status.equityDrawdownPct >= 2.0) ddScale = 0.75;
 
       double streakScale = 1.0;
-      if(m_status.consecutiveLosses >= 4)      streakScale = 0.40;
-      else if(m_status.consecutiveLosses == 3) streakScale = 0.55;
-      else if(m_status.consecutiveLosses == 2) streakScale = 0.75;
+      if(m_cfg.reduceRiskOnLossStreak)
+      {
+         if(m_status.consecutiveLosses >= 4)      streakScale = 0.40;
+         else if(m_status.consecutiveLosses == 3) streakScale = 0.55;
+         else if(m_status.consecutiveLosses == 2) streakScale = 0.75;
+      }
 
       effRiskPct *= MathMin(ddScale, streakScale);
 

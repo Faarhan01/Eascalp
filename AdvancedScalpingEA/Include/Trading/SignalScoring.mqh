@@ -1,7 +1,7 @@
 //+------------------------------------------------------------------+
 //|                                                SignalScoring.mqh |
 //|                        Advanced Multi-Market MT5 Scalping EA     |
-//|                        v2.2.0 Non-Redundant 0-100 Scoring Engine |
+//|                        v2.9.0 Non-Redundant 0-100 Scoring Engine |
 //+------------------------------------------------------------------+
 #ifndef __ASEA_TRADING_SIGNALSCORING_MQH__
 #define __ASEA_TRADING_SIGNALSCORING_MQH__
@@ -55,35 +55,44 @@ public:
       b.Reset();
       int dirSign = (sig.direction == SIGNAL_BUY) ? 1 : -1;
 
-      // 1. Regime quality & stability (0..10)
+      // 1. Regime quality, trend efficiency & stability (0..10)
       if(ctx.regime.isUnstable)
          b.regimeScore = 0.0;
       else if(suitability == SUIT_SUITABLE)
-         b.regimeScore = 6.0 + 4.0 * ctx.regime.confidence;
+         b.regimeScore = 5.0 + 4.0 * ctx.regime.confidence + ((ctx.regime.efficiencyRatio >= 0.28) ? 1.0 : 0.0);
       else if(suitability == SUIT_CONDITIONAL)
-         b.regimeScore = 3.5 + 3.0 * ctx.regime.confidence;
+         b.regimeScore = 2.5 + 3.0 * ctx.regime.confidence;
       else
-         b.regimeScore = 1.0;
+         b.regimeScore = 0.0;
 
       // 2. Market structure alignment, key level rejection/retest & session VWAP position (0..14)
-      if(sig.strategyId == STRAT_REVERSAL_SCALPING)
+      bool isRevOrMeanRev = (sig.strategyId == STRAT_REVERSAL_SCALPING ||
+                             sig.strategyId == STRAT_LIQUIDITY_SWEEP ||
+                             sig.strategyId == STRAT_VWAP_REVERSION);
+      if(isRevOrMeanRev)
       {
-         if((dirSign > 0 && (ctx.structure.lastEvent == STRUCT_CHOCH_BULL || ctx.structure.lastEvent == STRUCT_LIQ_SWEEP_LOW || ctx.structure.lastEvent == STRUCT_FAILED_BREAKOUT_DOWN)) ||
-            (dirSign < 0 && (ctx.structure.lastEvent == STRUCT_CHOCH_BEAR || ctx.structure.lastEvent == STRUCT_LIQ_SWEEP_HIGH || ctx.structure.lastEvent == STRUCT_FAILED_BREAKOUT_UP)))
-            b.structureScore = 12.0;
+         bool bullSweepEv = (ctx.structure.lastEvent == STRUCT_LIQ_SWEEP_LOW || ctx.structure.lastEvent == STRUCT_FAILED_BREAKOUT_DOWN || ctx.structure.lastEvent == STRUCT_REJECTION_LOW);
+         bool bearSweepEv = (ctx.structure.lastEvent == STRUCT_LIQ_SWEEP_HIGH || ctx.structure.lastEvent == STRUCT_FAILED_BREAKOUT_UP || ctx.structure.lastEvent == STRUCT_REJECTION_HIGH);
+         if((dirSign > 0 && (ctx.structure.lastEvent == STRUCT_CHOCH_BULL || bullSweepEv)) ||
+            (dirSign < 0 && (ctx.structure.lastEvent == STRUCT_CHOCH_BEAR || bearSweepEv)))
+            b.structureScore = (sig.strategyId == STRAT_LIQUIDITY_SWEEP) ? 12.5 : 11.5;
+         else if(sig.strategyId == STRAT_VWAP_REVERSION &&
+                 ((dirSign > 0 && ctx.market.close <= ctx.structure.nearestSupport + ctx.ind.atr * 0.65) ||
+                  (dirSign < 0 && ctx.structure.nearestResistance > 0.0 && ctx.market.close >= ctx.structure.nearestResistance - ctx.ind.atr * 0.65)))
+            b.structureScore = 9.0;
          else
-            b.structureScore = 5.0;
+            b.structureScore = 4.5;
       }
       else if(sig.strategyId == STRAT_RANGE_SCALPING)
       {
          int touches = (dirSign > 0) ? ctx.structure.supportRejectCount : ctx.structure.resistanceRejectCount;
-         b.structureScore = (touches >= 2) ? 13.0 : (touches == 1 ? 9.0 : 4.0);
+         b.structureScore = (touches >= 2) ? 12.5 : (touches == 1 ? 8.0 : 2.0);
       }
       else
       {
-         if(ctx.structure.structureBias == dirSign) b.structureScore = 9.5;
-         else if(ctx.structure.structureBias == 0)  b.structureScore = 5.5;
-         else                                       b.structureScore = 2.0;
+         if(ctx.structure.structureBias == dirSign) b.structureScore = 8.5;
+         else if(ctx.structure.structureBias == 0)  b.structureScore = 3.5;
+         else                                       b.structureScore = 0.0;
 
          if((dirSign > 0 && (ctx.structure.lastEvent == STRUCT_BOS_BULL || ctx.structure.lastEvent == STRUCT_RETEST_BULL || ctx.structure.lastEvent == STRUCT_BREAKOUT_UP)) ||
             (dirSign < 0 && (ctx.structure.lastEvent == STRUCT_BOS_BEAR || ctx.structure.lastEvent == STRUCT_RETEST_BEAR || ctx.structure.lastEvent == STRUCT_BREAKOUT_DOWN)))
@@ -99,16 +108,16 @@ public:
             if(dirSign > 0 && ctx.structure.nearestResistance > sig.entryPrice && ctx.structure.resistanceRejectCount >= 2)
             {
                double room = ctx.structure.nearestResistance - sig.entryPrice;
-               if(room < tpDist * 0.55)
-                  b.structureScore = MathMax(1.0, b.structureScore - 1.5);
+               if(room < tpDist * 0.60)
+                  b.structureScore = MathMax(0.0, b.structureScore - 3.0);
                else if(room >= tpDist * 0.90)
                   b.structureScore = MathMin(14.0, b.structureScore + 1.0);
             }
             else if(dirSign < 0 && ctx.structure.nearestSupport > 0.0 && ctx.structure.nearestSupport < sig.entryPrice && ctx.structure.supportRejectCount >= 2)
             {
                double room = sig.entryPrice - ctx.structure.nearestSupport;
-               if(room < tpDist * 0.55)
-                  b.structureScore = MathMax(1.0, b.structureScore - 1.5);
+               if(room < tpDist * 0.60)
+                  b.structureScore = MathMax(0.0, b.structureScore - 3.0);
                else if(room >= tpDist * 0.90)
                   b.structureScore = MathMin(14.0, b.structureScore + 1.0);
             }
@@ -119,135 +128,171 @@ public:
       if(ctx.ind.vwapAvailable && ctx.ind.vwap > 0.0 && ctx.ind.atr > 0.0)
       {
          double vwapDistAtr = (ctx.market.close - ctx.ind.vwap) / ctx.ind.atr;
-         if(sig.strategyId == STRAT_REVERSAL_SCALPING || sig.strategyId == STRAT_RANGE_SCALPING)
+         if(isRevOrMeanRev || sig.strategyId == STRAT_RANGE_SCALPING)
          {
-            // Mean-reversion favors buying below VWAP or selling above VWAP toward the value mean
             if((dirSign > 0 && vwapDistAtr < -0.45) || (dirSign < 0 && vwapDistAtr > 0.45))
-               b.structureScore = MathMin(14.0, b.structureScore + 1.5);
+            {
+               double vwapBonus = (sig.strategyId == STRAT_VWAP_REVERSION && MathAbs(vwapDistAtr) >= 1.40) ? 2.0 : 1.5;
+               b.structureScore = MathMin(14.0, b.structureScore + vwapBonus);
+            }
          }
          else
          {
-            // Continuation strategies favor trading on the institutional side of session VWAP without extreme overextension
-            if((dirSign > 0 && vwapDistAtr >= -0.25 && vwapDistAtr <= 2.2) ||
-               (dirSign < 0 && vwapDistAtr <= 0.25  && vwapDistAtr >= -2.2))
+            if((dirSign > 0 && vwapDistAtr >= 0.0 && vwapDistAtr <= 2.0) ||
+               (dirSign < 0 && vwapDistAtr <= 0.0 && vwapDistAtr >= -2.0))
                b.structureScore = MathMin(14.0, b.structureScore + 1.5);
-            else if((dirSign > 0 && vwapDistAtr < -0.75) || (dirSign < 0 && vwapDistAtr > 0.75))
-               b.structureScore = MathMax(1.0, b.structureScore - 1.0);
+            else if((dirSign > 0 && vwapDistAtr < -0.60) || (dirSign < 0 && vwapDistAtr > 0.60))
+               b.structureScore = MathMax(0.0, b.structureScore - 2.0);
+         }
+      }
+
+      // Previous Daily High/Low (PDH/PDL) institutional reference awareness
+      if(ctx.structure.prevDayHigh > 0.0 && ctx.structure.prevDayLow > 0.0 && ctx.ind.atr > 0.0)
+      {
+         if(isRevOrMeanRev || sig.strategyId == STRAT_RANGE_SCALPING)
+         {
+            bool sweptPdl = (dirSign > 0 && ctx.market.low <= ctx.structure.prevDayLow + ctx.ind.atr * 0.10 && ctx.market.close > ctx.structure.prevDayLow);
+            bool sweptPdh = (dirSign < 0 && ctx.market.high >= ctx.structure.prevDayHigh - ctx.ind.atr * 0.10 && ctx.market.close < ctx.structure.prevDayHigh);
+            if(sweptPdl || sweptPdh)
+               b.structureScore = MathMin(14.0, b.structureScore + 1.5);
+         }
+         else if(sig.strategyId != STRAT_BREAKOUT_SCALPING)
+         {
+            bool blockedByPdh = (dirSign > 0 && ctx.market.close < ctx.structure.prevDayHigh &&
+                                 (ctx.structure.prevDayHigh - ctx.market.close) < ctx.ind.atr * 0.55);
+            bool blockedByPdl = (dirSign < 0 && ctx.market.close > ctx.structure.prevDayLow &&
+                                 (ctx.market.close - ctx.structure.prevDayLow) < ctx.ind.atr * 0.55);
+            if(blockedByPdh || blockedByPdl)
+               b.structureScore = MathMax(0.0, b.structureScore - 2.0);
          }
       }
 
       // 3. Trend strength & EMA hierarchy (0..10)
       bool emaBull = (ctx.ind.emaFast > ctx.ind.emaMedium && ctx.ind.emaMedium > ctx.ind.emaSlow);
       bool emaBear = (ctx.ind.emaFast < ctx.ind.emaMedium && ctx.ind.emaMedium < ctx.ind.emaSlow);
-      if(sig.strategyId == STRAT_RANGE_SCALPING)
-         b.trendStrengthScore = (ctx.ind.adxMain <= 19.0) ? 9.5 : ((ctx.ind.adxMain <= 24.0) ? 6.5 : 2.0);
-      else if(sig.strategyId == STRAT_REVERSAL_SCALPING)
-         b.trendStrengthScore = (ctx.ind.adxMain <= 32.0) ? 8.0 : 4.0;
+      if(sig.strategyId == STRAT_RANGE_SCALPING || sig.strategyId == STRAT_VWAP_REVERSION)
+         b.trendStrengthScore = (ctx.ind.adxMain <= 18.0) ? 9.5 : ((ctx.ind.adxMain <= 23.0) ? 6.5 : 2.0);
+      else if(sig.strategyId == STRAT_REVERSAL_SCALPING || sig.strategyId == STRAT_LIQUIDITY_SWEEP)
+         b.trendStrengthScore = (ctx.ind.adxMain <= 28.0) ? 8.0 : 3.5;
       else
       {
-         double adxPts = MathMin(6.0, MathMax(1.0, (ctx.ind.adxMain / 35.0) * 6.0));
+         double adxPts = MathMin(6.0, MathMax(0.5, ((ctx.ind.adxMain - 10.0) / 25.0) * 6.0));
          double emaPts = ((dirSign > 0 && emaBull) || (dirSign < 0 && emaBear)) ? 4.0 :
-                         (((dirSign > 0 && ctx.ind.emaFast > ctx.ind.emaMedium) || (dirSign < 0 && ctx.ind.emaFast < ctx.ind.emaMedium)) ? 2.0 : 0.5);
-         b.trendStrengthScore = adxPts + emaPts;
+                         (((dirSign > 0 && ctx.ind.emaFast > ctx.ind.emaMedium) || (dirSign < 0 && ctx.ind.emaFast < ctx.ind.emaMedium)) ? 2.0 : 0.0);
+         double ribbonBonus = (sig.strategyId == STRAT_EMA_RIBBON &&
+                               ((dirSign > 0 && ctx.ind.emaSlow >= ctx.ind.smaTrend) ||
+                                (dirSign < 0 && ctx.ind.emaSlow <= ctx.ind.smaTrend))) ? 1.5 : 0.0;
+         b.trendStrengthScore = MathMin(10.0, adxPts + emaPts + ribbonBonus);
       }
 
       // 4. Momentum quality & non-exhaustion (0..12)
-      double momPts = 3.0;
-      if((dirSign > 0 && ctx.ind.macdHist > 0.0 && ctx.ind.momentumAccel >= 0.0 && ctx.ind.rsi > 46.0 && ctx.ind.rsi < 72.0) ||
-         (dirSign < 0 && ctx.ind.macdHist < 0.0 && ctx.ind.momentumAccel <= 0.0 && ctx.ind.rsi < 54.0 && ctx.ind.rsi > 28.0))
-         momPts = 11.0;
-      else if((dirSign > 0 && ctx.ind.macdHist > 0.0 && ctx.ind.rsi > 45.0 && ctx.ind.rsi < 74.0) ||
-              (dirSign < 0 && ctx.ind.macdHist < 0.0 && ctx.ind.rsi < 55.0 && ctx.ind.rsi > 26.0))
+      double momPts = 1.5;
+      if((dirSign > 0 && ctx.ind.macdHist > 0.0 && ctx.ind.momentumAccel >= 0.0 && ctx.ind.rsi > 48.0 && ctx.ind.rsi < 70.0) ||
+         (dirSign < 0 && ctx.ind.macdHist < 0.0 && ctx.ind.momentumAccel <= 0.0 && ctx.ind.rsi < 52.0 && ctx.ind.rsi > 30.0))
+         momPts = 11.5;
+      else if((dirSign > 0 && ctx.ind.macdHist > 0.0 && ctx.ind.rsi > 45.0 && ctx.ind.rsi < 72.0) ||
+              (dirSign < 0 && ctx.ind.macdHist < 0.0 && ctx.ind.rsi < 55.0 && ctx.ind.rsi > 28.0))
          momPts = 8.5;
       else if((dirSign > 0 && ctx.ind.roc > 0.0) || (dirSign < 0 && ctx.ind.roc < 0.0))
-         momPts = 7.0;
-      if(sig.strategyId == STRAT_REVERSAL_SCALPING && ((dirSign > 0 && ctx.ind.bullDivergence) || (dirSign < 0 && ctx.ind.bearDivergence)))
+         momPts = 5.5;
+      if(isRevOrMeanRev && ((dirSign > 0 && ctx.ind.bullDivergence) || (dirSign < 0 && ctx.ind.bearDivergence)))
          momPts = 12.0;
-      else if(ctx.ind.momentumExhaustion && sig.strategyId != STRAT_REVERSAL_SCALPING)
-         momPts = MathMax(1.0, momPts - 4.5);
+      else if(ctx.ind.momentumExhaustion && !isRevOrMeanRev)
+         momPts = MathMax(0.0, momPts - 5.5);
+
+      // Volume conviction adjustment (RVOL confirmation for breakouts/momentum & stopping-volume sweeps)
+      if(sig.strategyId == STRAT_BREAKOUT_SCALPING || sig.strategyId == STRAT_VOLATILITY_EXPANSION ||
+         sig.strategyId == STRAT_MOMENTUM_SCALPING || sig.strategyId == STRAT_EMA_RIBBON)
+      {
+         if(ctx.ind.relativeVolume >= 1.25)      momPts += 1.0;
+         else if(ctx.ind.relativeVolume < 0.75)  momPts = MathMax(0.0, momPts - 1.5);
+      }
+      else if(isRevOrMeanRev && ctx.ind.relativeVolume >= 1.20)
+      {
+         momPts += 0.5;
+      }
       b.momentumScore = MathMin(12.0, momPts);
 
       // 5. Volatility normalized suitability (0..8)
       if(ctx.regime.volatilityState == VOL_NORMAL)
-         b.volatilityScore = 8.0;
+         b.volatilityScore = 7.0;
       else if(ctx.regime.volatilityState == VOL_HIGH)
-         b.volatilityScore = (sig.strategyId == STRAT_VOLATILITY_EXPANSION || sig.strategyId == STRAT_BREAKOUT_SCALPING) ? 7.5 : 5.5;
+         b.volatilityScore = (sig.strategyId == STRAT_VOLATILITY_EXPANSION || sig.strategyId == STRAT_BREAKOUT_SCALPING) ? 8.0 : 4.5;
       else if(ctx.regime.volatilityState == VOL_LOW)
-         b.volatilityScore = (sig.strategyId == STRAT_RANGE_SCALPING) ? 6.5 : 3.0;
+         b.volatilityScore = (sig.strategyId == STRAT_RANGE_SCALPING || sig.strategyId == STRAT_VWAP_REVERSION) ? 6.0 : 2.0;
       else
-         b.volatilityScore = 1.0;
+         b.volatilityScore = 0.5;
 
-      // 6. Combined non-duplicated candle + chart pattern confluence (0..10)
-      double candlePart = 2.0;
+      // 6. Combined non-duplicated candle + chart pattern confluence (0..10, 0 when absent/opposing)
+      double candlePart = 0.0;
       if(ctx.candle.pattern != CANDLE_NONE && ctx.candle.bias == sig.direction)
-         candlePart = ctx.candle.contextValidated ? 5.5 : 4.0;
+         candlePart = ctx.candle.contextValidated ? 5.5 : 3.0;
       else if(ctx.candle.pattern != CANDLE_NONE && ctx.candle.bias != SIGNAL_NONE && ctx.candle.bias != sig.direction)
-         candlePart = 0.5;
+         candlePart = 0.0;
 
-      double chartPart = 2.0;
+      double chartPart = 0.0;
       if(ctx.chartPattern.pattern != PATTERN_NONE && ctx.chartPattern.bias == sig.direction)
          chartPart = 4.5 * ctx.chartPattern.confidence;
-      else if(ctx.chartPattern.pattern != PATTERN_NONE && ctx.chartPattern.bias != SIGNAL_NONE && ctx.chartPattern.bias != sig.direction)
-         chartPart = 0.5;
       b.patternConfluence = MathMin(10.0, candlePart + chartPart);
 
-      // 7. Multi-timeframe weighted agreement (0..12)
+      // 7. Multi-timeframe weighted agreement (0..12, no artificial boost for dead neutral HTF)
+      bool allowCounterHtfTol = (isRevOrMeanRev || sig.strategyId == STRAT_RANGE_SCALPING);
       double mtfBase = (ctx.mtf.agreementScore / 100.0) * 12.0;
       bool opposesHtf = ((dirSign > 0 && ctx.mtf.higherBias == SIGNAL_SELL) || (dirSign < 0 && ctx.mtf.higherBias == SIGNAL_BUY));
-      if(ctx.mtf.higherBias == SIGNAL_NONE && mtfBase < 5.0)
-         mtfBase = 5.0;
+      if(ctx.mtf.higherBias == SIGNAL_NONE && ctx.mtf.intermediateBias == SIGNAL_NONE)
+         mtfBase = MathMin(3.0, mtfBase);
       else if(ctx.mtf.assessment == MTF_CONFLICTING || opposesHtf)
-         mtfBase = (sig.strategyId == STRAT_REVERSAL_SCALPING || sig.strategyId == STRAT_RANGE_SCALPING) ? mtfBase * 0.65 : 0.0;
+         mtfBase = allowCounterHtfTol ? (mtfBase * 0.45) : 0.0;
       b.mtfAgreementScore = MathMin(12.0, mtfBase);
 
-      // 8. Cost-validated tick edge (0..8)
+      // 8. Cost-validated tick edge (0..8, 0 if spread consumes tick movement)
       if(ctx.ticks.isReady)
       {
          if(!ctx.ticks.tickProvidesNetEdge)
-            b.tickEdgeScore = (sig.strategyId == STRAT_MICRO_MOMENTUM) ? 0.0 : 2.5;
-         else if((dirSign > 0 && ctx.ticks.microTrendBias > 0.15) || (dirSign < 0 && ctx.ticks.microTrendBias < -0.15))
+            b.tickEdgeScore = 0.0;
+         else if((dirSign > 0 && ctx.ticks.microTrendBias > 0.20) || (dirSign < 0 && ctx.ticks.microTrendBias < -0.20))
             b.tickEdgeScore = 8.0;
          else
-            b.tickEdgeScore = 4.5;
+            b.tickEdgeScore = 4.0;
       }
       else
       {
-         b.tickEdgeScore = 3.5;
+         b.tickEdgeScore = 2.0;
       }
 
       // 9. Execution cost margin (spread ratio + spread-to-ATR) (0..8)
       double spreadToAtrPct = (ctx.ind.atr > 0.0 && ctx.symbolProfile.point > 0.0)
                               ? ((ctx.market.spreadPoints * ctx.symbolProfile.point) / ctx.ind.atr) * 100.0
                               : 10.0;
-      if(ctx.market.spreadRatio <= 1.10 && spreadToAtrPct <= 10.0)       b.executionCostScore = 8.0;
-      else if(ctx.market.spreadRatio <= 1.35 && spreadToAtrPct <= 16.0)  b.executionCostScore = 6.0;
-      else if(ctx.market.spreadRatio <= 1.75 && spreadToAtrPct <= 24.0)  b.executionCostScore = 3.5;
-      else                                                               b.executionCostScore = 1.0;
+      if(ctx.market.spreadRatio <= 1.10 && spreadToAtrPct <= 9.0)        b.executionCostScore = 8.0;
+      else if(ctx.market.spreadRatio <= 1.35 && spreadToAtrPct <= 15.0)  b.executionCostScore = 6.0;
+      else if(ctx.market.spreadRatio <= 1.75 && spreadToAtrPct <= 22.0)  b.executionCostScore = 3.0;
+      else                                                               b.executionCostScore = 0.5;
 
       // 10. Strategy suitability & validated historical performance (0..8)
-      double suitPart = (suitability == SUIT_SUITABLE) ? 4.0 : ((suitability == SUIT_CONDITIONAL) ? 2.5 : 0.5);
-      double histPart = 2.0; // neutral until sufficient sample
+      double suitPart = (suitability == SUIT_SUITABLE) ? 4.5 : ((suitability == SUIT_CONDITIONAL) ? 2.0 : 0.0);
+      double histPart = 1.5; // modest cold-start prior
       double perfAdj = 0.0;
       if(stratStats.hasSufficientSample)
       {
          if(stratStats.profitFactor >= 1.35 && !stratStats.deteriorationWarning)
          {
-            histPart = 4.0;
+            histPart = 3.5;
             perfAdj = 3.0;
          }
          else if(stratStats.profitFactor >= 1.05 && !stratStats.deteriorationWarning)
-            histPart = 2.8;
+            histPart = 2.5;
          else if(stratStats.deteriorationWarning || stratStats.profitFactor < 0.85)
          {
             histPart = 0.0;
-            perfAdj = -6.0;
+            perfAdj = -7.0;
          }
          else
-            histPart = 1.0;
+            histPart = 0.5;
       }
       b.strategySuitScore = suitPart + histPart;
 
-      double htfCounterPenalty = (opposesHtf && sig.strategyId != STRAT_REVERSAL_SCALPING && sig.strategyId != STRAT_RANGE_SCALPING) ? -8.0 : 0.0;
+      double htfCounterPenalty = (opposesHtf && !allowCounterHtfTol) ? -9.0 : 0.0;
 
       b.totalScore = b.regimeScore + b.structureScore + b.trendStrengthScore +
                      b.momentumScore + b.volatilityScore + b.patternConfluence +

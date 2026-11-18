@@ -1,7 +1,7 @@
 //+------------------------------------------------------------------+
 //|                                                TrendPullback.mqh |
 //|                        Advanced Multi-Market MT5 Scalping EA     |
-//|                        v2.0.0 Strategy 1: Depth-Measured Pullback|
+//|                        v2.9.0 Strategy 1: Depth-Measured Pullback|
 //+------------------------------------------------------------------+
 #ifndef __ASEA_STRATEGIES_TRENDPULLBACK_MQH__
 #define __ASEA_STRATEGIES_TRENDPULLBACK_MQH__
@@ -68,69 +68,93 @@ public:
       bool bearStack = (ctx.ind.emaFast < ctx.ind.emaMedium && ctx.ind.emaMedium < ctx.ind.emaSlow);
       double effSlMult = GetEffectiveSlMult(ctx, 1.0);
       double effTpMult = GetEffectiveTpMult(ctx, 1.0);
+      double barRange = MathMax(ctx.market.high - ctx.market.low, MathMax(ctx.symbolProfile.point, 0.0000001));
+      double body = MathAbs(ctx.market.close - ctx.market.open);
 
-      if(bullStack && ctx.structure.structureBias >= 0 && ctx.mtf.higherBias != SIGNAL_SELL &&
-         ctx.ind.adxPlusDI > ctx.ind.adxMinusDI)
+      bool bullMtfTailwind = (ctx.mtf.higherBias == SIGNAL_BUY) || (ctx.mtf.higherBias == SIGNAL_NONE && ctx.mtf.intermediateBias == SIGNAL_BUY);
+      bool bearMtfTailwind = (ctx.mtf.higherBias == SIGNAL_SELL) || (ctx.mtf.higherBias == SIGNAL_NONE && ctx.mtf.intermediateBias == SIGNAL_SELL);
+      bool bullWallClear = !(ctx.structure.nearestResistance > ctx.market.close &&
+                             (ctx.structure.nearestResistance - ctx.market.close) < ctx.ind.atr * 0.70 &&
+                             ctx.structure.resistanceRejectCount >= 2);
+      bool bearWallClear = !(ctx.structure.nearestSupport > 0.0 &&
+                             ctx.structure.nearestSupport < ctx.market.close &&
+                             (ctx.market.close - ctx.structure.nearestSupport) < ctx.ind.atr * 0.70 &&
+                             ctx.structure.supportRejectCount >= 2);
+
+      if(bullStack && ctx.structure.structureBias >= 0 && bullMtfTailwind && bullWallClear &&
+         ctx.ind.adxPlusDI > ctx.ind.adxMinusDI && ctx.ind.emaDistanceAtr <= 1.25 &&
+         (!ctx.ind.vwapAvailable || ctx.market.close >= ctx.ind.vwap - ctx.ind.atr * 0.25))
       {
          // Measure pullback depth relative to recent swing range
-         double swingSpan = MathMax(ctx.ind.atr * 1.2, ctx.structure.lastSwingHigh - ctx.structure.lastSwingLow);
+         double swingSpan = MathMax(ctx.ind.atr * 1.3, ctx.structure.lastSwingHigh - ctx.structure.lastSwingLow);
          double retraceDepth = (ctx.structure.lastSwingHigh - ctx.market.low) / swingSpan;
-         bool validDepth = (retraceDepth >= 0.12 && retraceDepth <= 0.82);
+         bool validDepth = (retraceDepth >= 0.18 && retraceDepth <= 0.78);
          bool touchedZone = (ctx.market.low <= ctx.ind.emaFast + tol || ctx.market.low <= ctx.ind.emaMedium + tol) &&
                             (ctx.market.close > ctx.ind.emaSlow) &&
-                            (ctx.market.close >= ctx.ind.emaMedium - ctx.ind.atr * 0.15);
-         bool momRecovery = (ctx.market.close > ctx.market.open) &&
+                            (ctx.market.close >= ctx.ind.emaMedium - ctx.ind.atr * 0.10);
+         bool closeConviction = (ctx.market.close > ctx.market.open) &&
+                                (body >= barRange * 0.20) &&
+                                ((ctx.market.close - ctx.market.low) >= barRange * 0.55);
+         bool momRecovery = closeConviction &&
                             (ctx.candle.bias != SIGNAL_SELL) &&
-                            (ctx.ind.macdHist >= ctx.ind.prevMacdHist || ctx.ind.stochK > ctx.ind.stochD) &&
-                            (ctx.ind.rsi >= 42.0 && ctx.ind.rsi <= 68.0);
+                            (ctx.ind.macdHist > ctx.ind.prevMacdHist || (ctx.ind.rsi > ctx.ind.prevRsi && ctx.ind.stochK > ctx.ind.stochD)) &&
+                            (ctx.ind.rsi >= 44.0 && ctx.ind.rsi <= 67.0);
 
          if(validDepth && touchedZone && momRecovery)
          {
+            bool fibSweetSpot = (retraceDepth >= 0.36 && retraceDepth <= 0.64);
+            double conf = fibSweetSpot ? 0.89 : 0.84;
             double slDist = ComputeStructuralSLDist(ctx, SIGNAL_BUY, effSlMult, effSlMult * 1.45);
             double tpMultEff = (ctx.mtf.alignedBullish && ctx.ind.adxMain >= 22.0) ? (effTpMult * 1.25) : effTpMult;
             double tpDist = MathMax(slDist * 1.50, ctx.ind.atr * tpMultEff);
-            PopulateCommonSignal(outSignal, ctx, SIGNAL_BUY, slDist, tpDist, 0.82,
+            PopulateCommonSignal(outSignal, ctx, SIGNAL_BUY, slDist, tpDist, conf,
                                  StringFormat("Bull pullback (%.0f%% retrace) to EMA zone/structure with momentum recovery", retraceDepth * 100.0),
                                  StringFormat("ADX=%.1f, RSI=%.1f, MACD_H slope+", ctx.ind.adxMain, ctx.ind.rsi),
                                  ctx.structure.summary, ctx.candle.name,
                                  ctx.mtf.hasStrongConflict ? ctx.mtf.conflictReason : "None");
             return true;
          }
-         outRejectReason = "Pullback depth or momentum recovery check failed";
+         outRejectReason = "Pullback depth, close conviction, or momentum recovery check failed";
          return false;
       }
 
-      if(bearStack && ctx.structure.structureBias <= 0 && ctx.mtf.higherBias != SIGNAL_BUY &&
-         ctx.ind.adxMinusDI > ctx.ind.adxPlusDI)
+      if(bearStack && ctx.structure.structureBias <= 0 && bearMtfTailwind && bearWallClear &&
+         ctx.ind.adxMinusDI > ctx.ind.adxPlusDI && ctx.ind.emaDistanceAtr >= -1.25 &&
+         (!ctx.ind.vwapAvailable || ctx.market.close <= ctx.ind.vwap + ctx.ind.atr * 0.25))
       {
-         double swingSpan = MathMax(ctx.ind.atr * 1.2, ctx.structure.lastSwingHigh - ctx.structure.lastSwingLow);
+         double swingSpan = MathMax(ctx.ind.atr * 1.3, ctx.structure.lastSwingHigh - ctx.structure.lastSwingLow);
          double retraceDepth = (ctx.market.high - ctx.structure.lastSwingLow) / swingSpan;
-         bool validDepth = (retraceDepth >= 0.12 && retraceDepth <= 0.82);
+         bool validDepth = (retraceDepth >= 0.18 && retraceDepth <= 0.78);
          bool touchedZone = (ctx.market.high >= ctx.ind.emaFast - tol || ctx.market.high >= ctx.ind.emaMedium - tol) &&
                             (ctx.market.close < ctx.ind.emaSlow) &&
-                            (ctx.market.close <= ctx.ind.emaMedium + ctx.ind.atr * 0.15);
-         bool momRecovery = (ctx.market.close < ctx.market.open) &&
+                            (ctx.market.close <= ctx.ind.emaMedium + ctx.ind.atr * 0.10);
+         bool closeConviction = (ctx.market.close < ctx.market.open) &&
+                                (body >= barRange * 0.20) &&
+                                ((ctx.market.high - ctx.market.close) >= barRange * 0.55);
+         bool momRecovery = closeConviction &&
                             (ctx.candle.bias != SIGNAL_BUY) &&
-                            (ctx.ind.macdHist <= ctx.ind.prevMacdHist || ctx.ind.stochK < ctx.ind.stochD) &&
-                            (ctx.ind.rsi <= 58.0 && ctx.ind.rsi >= 32.0);
+                            (ctx.ind.macdHist < ctx.ind.prevMacdHist || (ctx.ind.rsi < ctx.ind.prevRsi && ctx.ind.stochK < ctx.ind.stochD)) &&
+                            (ctx.ind.rsi <= 56.0 && ctx.ind.rsi >= 33.0);
 
          if(validDepth && touchedZone && momRecovery)
          {
+            bool fibSweetSpot = (retraceDepth >= 0.36 && retraceDepth <= 0.64);
+            double conf = fibSweetSpot ? 0.89 : 0.84;
             double slDist = ComputeStructuralSLDist(ctx, SIGNAL_SELL, effSlMult, effSlMult * 1.45);
             double tpMultEff = (ctx.mtf.alignedBearish && ctx.ind.adxMain >= 22.0) ? (effTpMult * 1.25) : effTpMult;
             double tpDist = MathMax(slDist * 1.50, ctx.ind.atr * tpMultEff);
-            PopulateCommonSignal(outSignal, ctx, SIGNAL_SELL, slDist, tpDist, 0.82,
+            PopulateCommonSignal(outSignal, ctx, SIGNAL_SELL, slDist, tpDist, conf,
                                  StringFormat("Bear pullback (%.0f%% retrace) to EMA zone/structure with momentum recovery", retraceDepth * 100.0),
                                  StringFormat("ADX=%.1f, RSI=%.1f, MACD_H slope-", ctx.ind.adxMain, ctx.ind.rsi),
                                  ctx.structure.summary, ctx.candle.name,
                                  ctx.mtf.hasStrongConflict ? ctx.mtf.conflictReason : "None");
             return true;
          }
-         outRejectReason = "Pullback depth or momentum recovery check failed";
+         outRejectReason = "Pullback depth, close conviction, or momentum recovery check failed";
          return false;
       }
 
-      outRejectReason = "No aligned trend stack or HTF directional conflict";
+      outRejectReason = "No aligned trend stack, MTF tailwind, or VWAP confluence";
       return false;
    }
 

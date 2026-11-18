@@ -1,7 +1,7 @@
 //+------------------------------------------------------------------+
 //|                                               TradeExecution.mqh |
 //|                        Advanced Multi-Market MT5 Scalping EA     |
-//|                        v2.0.0 Multi-Symbol Reliable Execution    |
+//|                        v2.9.0 Multi-Symbol Reliable Execution    |
 //+------------------------------------------------------------------+
 #ifndef __ASEA_TRADING_TRADEEXECUTION_MQH__
 #define __ASEA_TRADING_TRADEEXECUTION_MQH__
@@ -132,12 +132,16 @@ public:
    {
       SExecutionResult res;
       res.Reset();
-      res.executionTime = TimeCurrent();
+      res.executionTime = SafeCurrentTime();
       res.requestedVolume = lots;
       res.requestedPrice = sig.entryPrice;
 
       SSymbolProfile prof = symIntel.GetProfile();
-      double estCost = symIntel.EstimateExecutionCostMoney(lots, (double)prof.spreadPoints, 0.0);
+      MqlTick initTick;
+      double liveSpreadPts = (SymbolInfoTick(prof.symbol, initTick) && prof.point > 0.0 && initTick.ask >= initTick.bid && initTick.bid > 0.0)
+                             ? ((initTick.ask - initTick.bid) / prof.point)
+                             : (double)prof.spreadPoints;
+      double estCost = symIntel.EstimateExecutionCostMoney(lots, liveSpreadPts, 0.0);
       res.estimatedCostMoney = estCost;
 
       if(opMode == EA_MODE_RESEARCH_ONLY)
@@ -190,6 +194,9 @@ public:
 
       double normSL  = symIntel.NormalizePrice(sig.stopLoss);
       double normTP  = symIntel.NormalizePrice(sig.takeProfit);
+      double origSlDist = MathAbs(sig.entryPrice - sig.stopLoss);
+      double origTpDist = MathAbs(sig.takeProfit - sig.entryPrice);
+      double targetRR   = (origSlDist > 0.0 && origTpDist > 0.0) ? MathMax(1.30, origTpDist / origSlDist) : 1.50;
       double minStopDist = symIntel.GetMinStopDistancePrice();
       string comment = StringFormat("ASEA|S%d|%.0f", (int)sig.strategyId, sig.compositeScore);
       bool stopAdjustedRetried = false;
@@ -216,15 +223,19 @@ public:
             {
                if(curSL > 0.0 && curSL > (reqPrice - reqStopPad))
                   curSL = symIntel.NormalizePrice(reqPrice - reqStopPad);
-               if(curTP > 0.0 && curTP < (reqPrice + reqStopPad))
-                  curTP = symIntel.NormalizePrice(reqPrice + reqStopPad);
+               double actualSlD = (curSL > 0.0) ? MathAbs(reqPrice - curSL) : origSlDist;
+               double minTpPrice = reqPrice + MathMax(reqStopPad, actualSlD * targetRR);
+               if(curTP > 0.0 && curTP < minTpPrice)
+                  curTP = symIntel.NormalizePrice(minTpPrice);
             }
             else if(sig.direction == SIGNAL_SELL)
             {
                if(curSL > 0.0 && curSL < (reqPrice + reqStopPad))
                   curSL = symIntel.NormalizePrice(reqPrice + reqStopPad);
-               if(curTP > 0.0 && curTP > (reqPrice - reqStopPad))
-                  curTP = symIntel.NormalizePrice(reqPrice - reqStopPad);
+               double actualSlD = (curSL > 0.0) ? MathAbs(curSL - reqPrice) : origSlDist;
+               double maxTpPrice = reqPrice - MathMax(reqStopPad, actualSlD * targetRR);
+               if(curTP > 0.0 && curTP > maxTpPrice)
+                  curTP = symIntel.NormalizePrice(maxTpPrice);
             }
          }
 
@@ -242,11 +253,15 @@ public:
          if(sent && (res.retcode == TRADE_RETCODE_DONE || res.retcode == TRADE_RETCODE_DONE_PARTIAL))
          {
             res.executed = true;
-            res.filledPrice  = (m_trade.ResultPrice() > 0.0) ? m_trade.ResultPrice() : reqPrice;
+            double resultPx = m_trade.ResultPrice();
+            if(resultPx <= 0.0 && res.dealTicket > 0 && HistoryDealSelect(res.dealTicket))
+               resultPx = HistoryDealGetDouble(res.dealTicket, DEAL_PRICE);
+            res.filledPrice  = (resultPx > 0.0) ? resultPx : reqPrice;
             res.filledVolume = (m_trade.ResultVolume() > 0.0) ? m_trade.ResultVolume() : normVol;
             if(prof.point > 0.0)
                res.slippagePoints = MathAbs(res.filledPrice - reqPrice) / prof.point;
-            res.estimatedCostMoney = symIntel.EstimateExecutionCostMoney(res.filledVolume, (double)prof.spreadPoints, res.slippagePoints);
+            double fillSpreadPts = (prof.point > 0.0 && t.ask >= t.bid && t.bid > 0.0) ? ((t.ask - t.bid) / prof.point) : (double)prof.spreadPoints;
+            res.estimatedCostMoney = symIntel.EstimateExecutionCostMoney(res.filledVolume, fillSpreadPts, res.slippagePoints);
             res.positionTicket = ResolveOpenPositionTicket(prof.symbol, res.orderTicket, res.dealTicket);
             RecordSymbolBarExec(prof.symbol, barTime);
 
@@ -274,8 +289,14 @@ public:
             minStopDist = MathMax(minStopDist * 1.8, (double)(prof.spreadPoints + 25) * prof.point);
             continue;
          }
-         if(res.retcode != TRADE_RETCODE_REQUOTE && res.retcode != TRADE_RETCODE_PRICE_CHANGED && res.retcode != TRADE_RETCODE_TIMEOUT)
-            break;
+         if(res.retcode == TRADE_RETCODE_REQUOTE || res.retcode == TRADE_RETCODE_PRICE_CHANGED ||
+            res.retcode == TRADE_RETCODE_PRICE_OFF || res.retcode == TRADE_RETCODE_TIMEOUT ||
+            res.retcode == TRADE_RETCODE_CONNECTION)
+         {
+            if(!MQLInfoInteger(MQL_TESTER)) Sleep(35);
+            continue;
+         }
+         break;
       }
 
       return res;
@@ -290,13 +311,34 @@ public:
 
       SSymbolProfile prof = symIntel.GetProfile();
       ulong closeSlippage = (ulong)MathMax(m_maxSlippagePoints, prof.recommendedSlippagePts);
-      ENUM_ORDER_TYPE_FILLING modes[3] = {ORDER_FILLING_IOC, ORDER_FILLING_FOK, ORDER_FILLING_RETURN};
-      m_trade.SetTypeFilling(prof.preferredFilling);
-      bool ok = m_trade.PositionClose(ticket, closeSlippage);
-      for(int i = 0; !ok && m_trade.ResultRetcode() == TRADE_RETCODE_INVALID_FILL && i < 3; i++)
+      ENUM_ORDER_TYPE_FILLING modes[3] = {prof.preferredFilling, ORDER_FILLING_IOC, ORDER_FILLING_RETURN};
+      if(prof.preferredFilling == ORDER_FILLING_IOC) { modes[1] = ORDER_FILLING_FOK; modes[2] = ORDER_FILLING_RETURN; }
+      else if(prof.preferredFilling == ORDER_FILLING_FOK) { modes[1] = ORDER_FILLING_IOC; modes[2] = ORDER_FILLING_RETURN; }
+      else { modes[1] = ORDER_FILLING_IOC; modes[2] = ORDER_FILLING_FOK; }
+
+      int fillIdx = 0;
+      m_trade.SetTypeFilling(modes[fillIdx]);
+      bool ok = false;
+      int totalTries = MathMax(3, m_maxRetries + 1);
+      for(int attempt = 1; attempt <= totalTries; attempt++)
       {
-         m_trade.SetTypeFilling(modes[i]);
          ok = m_trade.PositionClose(ticket, closeSlippage);
+         if(ok) break;
+         uint rc = m_trade.ResultRetcode();
+         if(rc == TRADE_RETCODE_INVALID_FILL && fillIdx < 2)
+         {
+            fillIdx++;
+            m_trade.SetTypeFilling(modes[fillIdx]);
+            continue;
+         }
+         if(rc == TRADE_RETCODE_REQUOTE || rc == TRADE_RETCODE_PRICE_CHANGED ||
+            rc == TRADE_RETCODE_PRICE_OFF || rc == TRADE_RETCODE_TIMEOUT ||
+            rc == TRADE_RETCODE_CONNECTION)
+         {
+            if(!MQLInfoInteger(MQL_TESTER)) Sleep(30);
+            continue;
+         }
+         break;
       }
 
       if(m_diag != NULL)
@@ -321,13 +363,34 @@ public:
          return false;
 
       ulong closeSlippage = (ulong)MathMax(m_maxSlippagePoints, prof.recommendedSlippagePts);
-      ENUM_ORDER_TYPE_FILLING modes[3] = {ORDER_FILLING_IOC, ORDER_FILLING_FOK, ORDER_FILLING_RETURN};
-      m_trade.SetTypeFilling(prof.preferredFilling);
-      bool ok = m_trade.PositionClosePartial(ticket, normClose, closeSlippage);
-      for(int i = 0; !ok && m_trade.ResultRetcode() == TRADE_RETCODE_INVALID_FILL && i < 3; i++)
+      ENUM_ORDER_TYPE_FILLING modes[3] = {prof.preferredFilling, ORDER_FILLING_IOC, ORDER_FILLING_RETURN};
+      if(prof.preferredFilling == ORDER_FILLING_IOC) { modes[1] = ORDER_FILLING_FOK; modes[2] = ORDER_FILLING_RETURN; }
+      else if(prof.preferredFilling == ORDER_FILLING_FOK) { modes[1] = ORDER_FILLING_IOC; modes[2] = ORDER_FILLING_RETURN; }
+      else { modes[1] = ORDER_FILLING_IOC; modes[2] = ORDER_FILLING_FOK; }
+
+      int fillIdx = 0;
+      m_trade.SetTypeFilling(modes[fillIdx]);
+      bool ok = false;
+      int totalTries = MathMax(3, m_maxRetries + 1);
+      for(int attempt = 1; attempt <= totalTries; attempt++)
       {
-         m_trade.SetTypeFilling(modes[i]);
          ok = m_trade.PositionClosePartial(ticket, normClose, closeSlippage);
+         if(ok) break;
+         uint rc = m_trade.ResultRetcode();
+         if(rc == TRADE_RETCODE_INVALID_FILL && fillIdx < 2)
+         {
+            fillIdx++;
+            m_trade.SetTypeFilling(modes[fillIdx]);
+            continue;
+         }
+         if(rc == TRADE_RETCODE_REQUOTE || rc == TRADE_RETCODE_PRICE_CHANGED ||
+            rc == TRADE_RETCODE_PRICE_OFF || rc == TRADE_RETCODE_TIMEOUT ||
+            rc == TRADE_RETCODE_CONNECTION)
+         {
+            if(!MQLInfoInteger(MQL_TESTER)) Sleep(30);
+            continue;
+         }
+         break;
       }
 
       if(m_diag != NULL)
@@ -350,7 +413,8 @@ public:
       double curSL  = PositionGetDouble(POSITION_SL);
       double curTP  = PositionGetDouble(POSITION_TP);
 
-      if(MathAbs(normSL - curSL) < prof.point && MathAbs(normTP - curTP) < prof.point)
+      double priceStep = MathMax(prof.point, prof.tickSize);
+      if(MathAbs(normSL - curSL) < priceStep * 0.5 && MathAbs(normTP - curTP) < priceStep * 0.5)
          return true;
 
       // Guard against broker freeze distance around market price before submitting modify request

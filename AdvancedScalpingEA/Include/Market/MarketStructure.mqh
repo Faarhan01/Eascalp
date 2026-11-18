@@ -1,7 +1,7 @@
 //+------------------------------------------------------------------+
 //|                                              MarketStructure.mqh |
 //|                        Advanced Multi-Market MT5 Scalping EA     |
-//|                        v2.0.0 Confirmed vs Developing Structure  |
+//|                        v2.9.0 Confirmed vs Developing Structure  |
 //+------------------------------------------------------------------+
 #ifndef __ASEA_MARKET_MARKETSTRUCTURE_MQH__
 #define __ASEA_MARKET_MARKETSTRUCTURE_MQH__
@@ -49,14 +49,20 @@ private:
       int touches = 0;
       for(int i = 0; i < barsCheck; i++)
       {
+         double rng = rates[i].high - rates[i].low;
+         if(rng <= 0.0) continue;
          if(isResistance)
          {
-            if(rates[i].high >= level - tol && rates[i].close < level && rates[i].close < rates[i].open)
+            double upWick = rates[i].high - MathMax(rates[i].open, rates[i].close);
+            if(rates[i].high >= level - tol && rates[i].close < level &&
+               (rates[i].close < rates[i].open || upWick >= rng * 0.30))
                touches++;
          }
          else
          {
-            if(rates[i].low <= level + tol && rates[i].close > level && rates[i].close > rates[i].open)
+            double loWick = MathMin(rates[i].open, rates[i].close) - rates[i].low;
+            if(rates[i].low <= level + tol && rates[i].close > level &&
+               (rates[i].close > rates[i].open || loWick >= rng * 0.30))
                touches++;
          }
       }
@@ -82,9 +88,12 @@ public:
 
    bool Analyze(const CMarketData &data, const ENUM_TIMEFRAMES tf, const double atr)
    {
-      SMarketSnapshot snap = data.GetSnapshot();
-      if(snap.dataReady && snap.barTime == m_lastAnalyzedBar && m_state.isReady)
+      if(!data.IsDataReady()) return false;
+      datetime barT = data.GetBarTime();
+      if(barT == m_lastAnalyzedBar && m_state.isReady)
          return true; // Cached for current closed bar
+
+      string sym = data.GetSymbol();
 
       MqlRates rates[];
       if(!data.CopyAvailableClosedRates(tf, 40, m_lookbackBars, rates))
@@ -108,21 +117,72 @@ public:
       datetime swingLowTimes[12];
       int slCount = 0;
 
+      // Estimate ATR when caller passes 0 so swing prominence still filters micro-noise
+      double estAtr = atr;
+      if(estAtr <= 0.0)
+      {
+         int avgN = MathMin(20, total);
+         double sumR = 0.0;
+         for(int i = 0; i < avgN; i++) sumR += (rates[i].high - rates[i].low);
+         estAtr = (avgN > 0 && sumR > 0.0) ? (sumR / (double)avgN) : 1e-6;
+      }
+      double minProm = estAtr * 0.40;
+
+      // Pass 1: Prominent structural swing pivots clearing minProm excursion across local window
       for(int i = m_swingStrength; i < total - m_swingStrength; i++)
       {
          if(shCount < 12 && IsSwingHigh(rates, i, total, m_swingStrength))
          {
-            swingHighs[shCount] = rates[i].high;
-            swingHighTimes[shCount] = rates[i].time;
-            shCount++;
+            double winLow = rates[i].low;
+            int wEnd = MathMin(total - 1, i + m_swingStrength + 2);
+            int wStart = MathMax(0, i - m_swingStrength - 2);
+            for(int j = wStart; j <= wEnd; j++)
+               if(rates[j].low < winLow) winLow = rates[j].low;
+            if((rates[i].high - winLow) >= minProm)
+            {
+               swingHighs[shCount] = rates[i].high;
+               swingHighTimes[shCount] = rates[i].time;
+               shCount++;
+            }
          }
          if(slCount < 12 && IsSwingLow(rates, i, total, m_swingStrength))
          {
-            swingLows[slCount] = rates[i].low;
-            swingLowTimes[slCount] = rates[i].time;
-            slCount++;
+            double winHigh = rates[i].high;
+            int wEnd = MathMin(total - 1, i + m_swingStrength + 2);
+            int wStart = MathMax(0, i - m_swingStrength - 2);
+            for(int j = wStart; j <= wEnd; j++)
+               if(rates[j].high > winHigh) winHigh = rates[j].high;
+            if((winHigh - rates[i].low) >= minProm)
+            {
+               swingLows[slCount] = rates[i].low;
+               swingLowTimes[slCount] = rates[i].time;
+               slCount++;
+            }
          }
          if(shCount >= 12 && slCount >= 12) break;
+      }
+
+      // Pass 2: Graceful backfill if quiet range yields < 2 prominent swings
+      if(shCount < 2 || slCount < 2)
+      {
+         shCount = 0;
+         slCount = 0;
+         for(int i = m_swingStrength; i < total - m_swingStrength; i++)
+         {
+            if(shCount < 12 && IsSwingHigh(rates, i, total, m_swingStrength))
+            {
+               swingHighs[shCount] = rates[i].high;
+               swingHighTimes[shCount] = rates[i].time;
+               shCount++;
+            }
+            if(slCount < 12 && IsSwingLow(rates, i, total, m_swingStrength))
+            {
+               swingLows[slCount] = rates[i].low;
+               swingLowTimes[slCount] = rates[i].time;
+               slCount++;
+            }
+            if(shCount >= 12 && slCount >= 12) break;
+         }
       }
 
       if(shCount < 2 || slCount < 2)
@@ -166,6 +226,20 @@ public:
       m_state.rangeHigh = rHigh;
       m_state.rangeLow  = rLow;
 
+      // Refresh institutional Previous Day High/Low (PDH/PDL) once per D1 bar
+      datetime curDayTime = iTime(sym, PERIOD_D1, 0);
+      if(curDayTime > 0 && curDayTime != m_state.prevDayBarTime)
+      {
+         MqlRates d1Rates[];
+         ArraySetAsSeries(d1Rates, true);
+         if(CopyRates(sym, PERIOD_D1, 1, 1, d1Rates) == 1)
+         {
+            m_state.prevDayHigh    = d1Rates[0].high;
+            m_state.prevDayLow     = d1Rates[0].low;
+            m_state.prevDayBarTime = curDayTime;
+         }
+      }
+
       double effAtr = (atr > 0.0) ? atr : MathMax(1e-6, (rHigh - rLow) * 0.1);
       double rangeSpan = m_state.rangeHigh - m_state.rangeLow;
       m_state.rangeWidthAtr = rangeSpan / effAtr;
@@ -173,7 +247,7 @@ public:
       double lastClose = rates[0].close;
       double prevClose = rates[1].close;
 
-      // Nearest S/R from confirmed swings
+      // Nearest S/R strictly below/above close so breakouts never invert anchors
       double bestSup = 0.0, bestRes = 0.0;
       double minSupDist = 1e18, minResDist = 1e18;
       for(int i = 0; i < slCount; i++)
@@ -192,11 +266,16 @@ public:
             bestRes = swingHighs[i];
          }
       }
-      m_state.nearestSupport    = (bestSup > 0.0) ? bestSup : m_state.lastSwingLow;
-      m_state.nearestResistance = (bestRes > 0.0) ? bestRes : m_state.lastSwingHigh;
+      if(bestSup <= 0.0 && m_state.rangeLow < lastClose)
+         bestSup = m_state.rangeLow;
+      if(bestRes <= 0.0 && m_state.rangeHigh > lastClose)
+         bestRes = m_state.rangeHigh;
 
-      m_state.supportRejectCount    = CountZoneRejections(rates, MathMin(40, total), m_state.nearestSupport, zoneTol, false);
-      m_state.resistanceRejectCount = CountZoneRejections(rates, MathMin(40, total), m_state.nearestResistance, zoneTol, true);
+      m_state.nearestSupport    = bestSup;
+      m_state.nearestResistance = bestRes;
+
+      m_state.supportRejectCount    = CountZoneRejections(rates, MathMin(30, total), m_state.nearestSupport, zoneTol, false);
+      m_state.resistanceRejectCount = CountZoneRejections(rates, MathMin(30, total), m_state.nearestResistance, zoneTol, true);
 
       m_state.lastEvent = STRUCT_NONE;
       m_state.structureBias = 0;
@@ -223,6 +302,16 @@ public:
       m_state.wideConsolidation  = (m_state.rangeWidthAtr > 2.8 && m_state.rangeWidthAtr <= 5.5 && nonTrend);
       m_state.inConsolidation    = (m_state.tightConsolidation || m_state.wideConsolidation);
 
+      // Verify breakout actually occurred recently (bars [2..6]) before classifying a genuine retest
+      bool recentBullBreak = false;
+      bool recentBearBreak = false;
+      int checkEnd = MathMin(6, total - 1);
+      for(int b = 2; b <= checkEnd; b++)
+      {
+         if(rates[b].close <= m_state.lastSwingHigh) recentBullBreak = true;
+         if(rates[b].close >= m_state.lastSwingLow)  recentBearBreak = true;
+      }
+
       // Failed breakout detection: bar[1] closed outside swing/range, bar[0] closed back inside
       if(rates[1].close > m_state.lastSwingHigh && lastClose < m_state.lastSwingHigh)
       {
@@ -236,15 +325,15 @@ public:
          m_state.failedBreakout = true;
          m_state.trendExhaustion = m_state.hasLL;
       }
-      // Breakout retest detection: price broke swing recently (within 2-4 bars) and pulled back to kiss level & bounce
-      else if(lastClose > m_state.lastSwingHigh && rates[0].low <= m_state.lastSwingHigh + zoneTol &&
+      // Breakout retest detection: price broke swing recently (within 2-6 bars) and pulled back to kiss level & bounce
+      else if(recentBullBreak && lastClose > m_state.lastSwingHigh && rates[0].low <= m_state.lastSwingHigh + zoneTol &&
               rates[0].close > rates[0].open && prevClose > m_state.lastSwingHigh)
       {
          m_state.lastEvent = STRUCT_RETEST_BULL;
          m_state.breakoutRetest = true;
          m_state.structureBias = 1;
       }
-      else if(lastClose < m_state.lastSwingLow && rates[0].high >= m_state.lastSwingLow - zoneTol &&
+      else if(recentBearBreak && lastClose < m_state.lastSwingLow && rates[0].high >= m_state.lastSwingLow - zoneTol &&
               rates[0].close < rates[0].open && prevClose < m_state.lastSwingLow)
       {
          m_state.lastEvent = STRUCT_RETEST_BEAR;
@@ -293,11 +382,11 @@ public:
       {
          m_state.lastEvent = STRUCT_BREAKOUT_DOWN;
       }
-      else if(MathAbs(rates[0].high - m_state.nearestResistance) <= zoneTol && rates[0].close < rates[0].open)
+      else if(m_state.nearestResistance > lastClose && MathAbs(rates[0].high - m_state.nearestResistance) <= zoneTol && rates[0].close < rates[0].open)
       {
          m_state.lastEvent = STRUCT_REJECTION_HIGH;
       }
-      else if(MathAbs(rates[0].low - m_state.nearestSupport) <= zoneTol && rates[0].close > rates[0].open)
+      else if(m_state.nearestSupport > 0.0 && m_state.nearestSupport < lastClose && MathAbs(rates[0].low - m_state.nearestSupport) <= zoneTol && rates[0].close > rates[0].open)
       {
          m_state.lastEvent = STRUCT_REJECTION_LOW;
       }
@@ -307,7 +396,7 @@ public:
       else if(m_state.wideConsolidation) biasStr += " [Wide Range]";
       m_state.summary = biasStr;
       m_state.isReady = true;
-      m_lastAnalyzedBar = snap.barTime;
+      m_lastAnalyzedBar = barT;
       return true;
    }
 

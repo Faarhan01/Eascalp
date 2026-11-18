@@ -1,7 +1,7 @@
 //+------------------------------------------------------------------+
 //|                                             AdaptiveLearning.mqh |
 //|                        Advanced Multi-Market MT5 Scalping EA     |
-//|                        v2.0.0 5-Stage Controlled Research Engine |
+//|                        v2.9.0 5-Stage Controlled Research Engine |
 //+------------------------------------------------------------------+
 #ifndef __ASEA_INTELLIGENCE_ADAPTIVELEARNING_MQH__
 #define __ASEA_INTELLIGENCE_ADAPTIVELEARNING_MQH__
@@ -56,7 +56,7 @@ public:
       m_diag = diag;
       m_summary.Reset();
       m_summary.learningStatus = m_enableAdaptiveEvaluation ? "5-Stage Controlled (Non-Mutating)" : "Passive Logging Only";
-      m_summary.stage4ValidatedConfig = (activeCfgVer != "") ? activeCfgVer : "v2.0.0-Baseline";
+      m_summary.stage4ValidatedConfig = (activeCfgVer != "") ? activeCfgVer : "AutoAdaptive_v2.9";
       m_summary.stage5ActiveConfig    = m_summary.stage4ValidatedConfig;
    }
 
@@ -96,7 +96,8 @@ public:
    // Controlled 5-stage evaluation: records findings & recommendations WITHOUT silently altering live risk caps
    bool EvaluateStrategies(CStrategyBase *&strategies[], const int count, const ENUM_MARKET_REGIME curRegime,
                            const SFilterStats &fStats, const int totalClosedTrades,
-                           const string scoreBandSummary, SLearningProposal &outNewProposal)
+                           const string scoreBandSummary, SLearningProposal &outNewProposal,
+                           const string researchExtras = "")
    {
       outNewProposal.timestamp = 0;
       m_summary.stage1RawObs = StringFormat("%I64d obs | %I64d sig (%I64d acc / %I64d rej)",
@@ -117,7 +118,7 @@ public:
          if(st.totalTrades >= m_minSamplePerRegime && st.profitFactor < m_deteriorationPfFloor &&
             m_lastProposal.strategyName != st.strategyName)
          {
-            outNewProposal.timestamp    = TimeCurrent();
+            outNewProposal.timestamp    = SafeCurrentTime();
             outNewProposal.strategyName = st.strategyName;
             outNewProposal.regimeLabel  = RegimeToString(curRegime);
             outNewProposal.finding      = StringFormat("PF %.2f < %.2f across %d trades (Recent WR=%.1f%%)",
@@ -143,9 +144,10 @@ public:
       }
       else
       {
-         m_summary.stage2HistoricalFinding = StringFormat("n=%d | %s | Rej[Score:%I64d Spread:%I64d Exp:%I64d]",
+         m_summary.stage2HistoricalFinding = StringFormat("n=%d | %s | Rej[Score:%I64d Spread:%I64d Exp:%I64d]%s",
                                                           totalClosedTrades, scoreBandSummary,
-                                                          fStats.rejLowScore, fStats.rejSpread, fStats.rejExpectancy);
+                                                          fStats.rejLowScore, fStats.rejSpread, fStats.rejExpectancy,
+                                                          (researchExtras != "") ? (" | " + researchExtras) : "");
       }
 
       // Stage 3: Recommendations

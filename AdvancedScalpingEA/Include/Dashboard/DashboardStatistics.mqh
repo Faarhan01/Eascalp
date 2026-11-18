@@ -1,10 +1,10 @@
 //+------------------------------------------------------------------+
 //|                                          DashboardStatistics.mqh |
 //|                        Advanced Multi-Market MT5 Scalping EA     |
-//|                        Read-Only Metric Formatting Helpers       |
+//|                        v2.9.0 Metric Formatting Helpers         |
 //+------------------------------------------------------------------+
-#ifndef __ASEA_DASHBOARD_STATISTICS_MQH__
-#define __ASEA_DASHBOARD_STATISTICS_MQH__
+#ifndef __ASEA_DASHBOARD_DASHBOARDSTATISTICS_MQH__
+#define __ASEA_DASHBOARD_DASHBOARDSTATISTICS_MQH__
 
 #include "../Core/Types.mqh"
 
@@ -50,6 +50,9 @@ public:
       StringReplace(clean, "Scalping", "");
       StringReplace(clean, "Volatility ", "Vol ");
       StringReplace(clean, "Micro-", "u");
+      StringReplace(clean, "Liquidity Sweep", "LiqSweep");
+      StringReplace(clean, "VWAP Reversion", "VWAPRev");
+      StringReplace(clean, "EMA Ribbon Cont.", "EMARib");
       StringTrimLeft(clean);
       StringTrimRight(clean);
       if(StringLen(clean) <= maxLen) return clean;
@@ -57,4 +60,4 @@ public:
    }
 };
 
-#endif // __ASEA_DASHBOARD_STATISTICS_MQH__
+#endif // __ASEA_DASHBOARD_DASHBOARDSTATISTICS_MQH__

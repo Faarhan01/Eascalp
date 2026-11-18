@@ -1,10 +1,10 @@
 //+------------------------------------------------------------------+
 //|                                             DashboardManager.mqh |
 //|                        Advanced Multi-Market MT5 Scalping EA     |
-//|                        v2.1.0 Strictly Read-Only Terminal        |
+//|                        v2.9.0 Strictly Read-Only Terminal        |
 //+------------------------------------------------------------------+
-#ifndef __ASEA_DASHBOARD_MANAGER_MQH__
-#define __ASEA_DASHBOARD_MANAGER_MQH__
+#ifndef __ASEA_DASHBOARD_DASHBOARDMANAGER_MQH__
+#define __ASEA_DASHBOARD_DASHBOARDMANAGER_MQH__
 
 #include "../Core/Types.mqh"
 #include "DashboardComponents.mqh"
@@ -116,7 +116,7 @@ private:
       DrawRow("mk1", g.colLeftX + 10, y, "Bid / Ask:", DoubleToString(s.market.bid, d) + " / " + DoubleToString(s.market.ask, d)); y += g.rowStep;
       DrawRow("mk2", g.colLeftX + 10, y, "Spread (Cur/Avg):", StringFormat("%.1f / %.1f pts (%.2fx)", s.market.spreadPoints, s.market.avgSpreadPoints, s.market.spreadRatio)); y += g.rowStep;
       DrawRow("mk3", g.colLeftX + 10, y, "ATR / VolPctile:", StringFormat("%s (%.0f%%ile)", DoubleToString(s.indicators.atr, d), s.indicators.volatilityPercentile)); y += g.rowStep;
-      DrawRow("mk4", g.colLeftX + 10, y, "RSI / ADX / Persist:", StringFormat("%.1f / %.1f / %.2f", s.indicators.rsi, s.indicators.adxMain, s.indicators.directionalPersist)); y += g.rowStep;
+      DrawRow("mk4", g.colLeftX + 10, y, "RSI / ADX / RVOL:", StringFormat("%.1f / %.1f / %.2fx", s.indicators.rsi, s.indicators.adxMain, s.indicators.relativeVolume)); y += g.rowStep;
       DrawRow("mk5", g.colLeftX + 10, y, "Tick Vel / Edge:", StringFormat("%.1f pts/s (%s)", s.ticks.priceVelocity, s.ticks.tickProvidesNetEdge ? "NetEdge+" : "NoEdge")); y += g.rowStep;
       DrawRow("mk6", g.colLeftX + 10, y, "Structure:", CDashboardStatistics::Truncate(s.structure.summary, maxChars)); y += g.rowStep;
       DrawRow("mk7", g.colLeftX + 10, y, "Sup / Res (Rej):", StringFormat("%s(%d) / %s(%d)", DoubleToString(s.structure.nearestSupport, d), s.structure.supportRejectCount, DoubleToString(s.structure.nearestResistance, d), s.structure.resistanceRejectCount)); y += g.rowStep;
@@ -140,7 +140,7 @@ private:
       CDashboardPrimitives::DrawPanel(m_chartId, "BODY_PFULL", g.contentX, g.contentY, g.contentW, g.contentH, ASEA_CLR_BG_PANEL, ASEA_CLR_BORDER, 10);
       CDashboardPrimitives::DrawLabel(m_chartId, "BODY_SHDR", g.contentX + 10, g.contentY + 10,
                                       "Strategy              Suitability  Trades  WinRate   NetPnL      PF     EV     Sample", ASEA_CLR_ACCENT, 8, "Consolas");
-      int y = g.contentY + 34;
+      int y = g.contentY + 32;
       for(int i = 0; i < EA_MAX_STRATEGIES; i++)
       {
          SStrategyStats st = s.strategyStats[i];
@@ -152,7 +152,7 @@ private:
                                    st.winRatePct, st.netProfit, st.profitFactor, st.expectedValue, sample);
          color clr = !st.enabledByInput ? ASEA_CLR_TEXT_MUTED : (st.deteriorationWarning ? ASEA_CLR_AMBER : ASEA_CLR_TEXT_PRIMARY);
          CDashboardPrimitives::DrawLabel(m_chartId, "BODY_SR_" + IntegerToString(i), g.contentX + 10, y, row, clr, 8, "Consolas");
-         y += 22;
+         y += 21;
       }
    }
 
@@ -327,4 +327,4 @@ public:
    }
 };
 
-#endif // __ASEA_DASHBOARD_MANAGER_MQH__
+#endif // __ASEA_DASHBOARD_DASHBOARDMANAGER_MQH__

@@ -1,7 +1,7 @@
 //+------------------------------------------------------------------+
 //|                                                   MarketData.mqh |
 //|                        Advanced Multi-Market MT5 Scalping EA     |
-//|                        v2.0.0 Cached Multi-Timeframe Data Engine |
+//|                        v2.9.0 Cached Multi-Timeframe Data Engine |
 //+------------------------------------------------------------------+
 #ifndef __ASEA_MARKET_MARKETDATA_MQH__
 #define __ASEA_MARKET_MARKETDATA_MQH__
@@ -25,6 +25,8 @@ private:
    int             m_spreadCap;
    int             m_spreadCount;
    int             m_spreadHead;
+   double          m_spreadSum;
+   int             m_spreadOps;
 
    SMarketSnapshot m_snapshot;
    datetime        m_lastClosedBarTime;
@@ -34,19 +36,31 @@ private:
    void RecordSpread(const double spreadPts)
    {
       if(m_spreadCap <= 0) return;
-      m_spreadHistory[m_spreadHead] = spreadPts;
-      m_spreadHead = (m_spreadHead + 1) % m_spreadCap;
-      if(m_spreadCount < m_spreadCap)
+      if(m_spreadCount >= m_spreadCap)
+         m_spreadSum -= m_spreadHistory[m_spreadHead];
+      else
          m_spreadCount++;
+
+      m_spreadHistory[m_spreadHead] = spreadPts;
+      m_spreadSum += spreadPts;
+      m_spreadHead = (m_spreadHead + 1) % m_spreadCap;
+
+      // Periodic exact resync prevents long-run floating-point accumulation drift
+      if(++m_spreadOps >= 4096)
+      {
+         m_spreadOps = 0;
+         double exactSum = 0.0;
+         for(int i = 0; i < m_spreadCount; i++)
+            exactSum += m_spreadHistory[i];
+         m_spreadSum = exactSum;
+      }
    }
 
    double ComputeAverageSpread() const
    {
       if(m_spreadCount <= 0) return m_snapshot.spreadPoints;
-      double sum = 0.0;
-      for(int i = 0; i < m_spreadCount; i++)
-         sum += m_spreadHistory[i];
-      return sum / (double)m_spreadCount;
+      double avg = m_spreadSum / (double)m_spreadCount;
+      return (avg > 0.0) ? avg : m_snapshot.spreadPoints;
    }
 
 public:
@@ -59,6 +73,8 @@ public:
       m_spreadCap = 120;
       m_spreadCount = 0;
       m_spreadHead = 0;
+      m_spreadSum = 0.0;
+      m_spreadOps = 0;
       m_lastClosedBarTime = 0;
       m_cachedBarStamp = 0;
       m_snapshot.Reset();
@@ -76,6 +92,8 @@ public:
       ArrayInitialize(m_spreadHistory, 0.0);
       m_spreadCount = 0;
       m_spreadHead = 0;
+      m_spreadSum = 0.0;
+      m_spreadOps = 0;
       m_lastClosedBarTime = 0;
       m_cachedBarStamp = 0;
 
@@ -97,6 +115,26 @@ public:
       for(int i = 0; i < EA_MAX_TF_SLOTS; i++)
          m_tfAvailable[i] = (Bars(m_symbol, m_supportedTFs[i]) >= 30);
 
+      // Seed spread moving average from recent terminal ticks so initial spreadRatio is calibrated immediately
+      double initPt = (m_symIntel != NULL) ? m_symIntel.GetPoint() : 0.0;
+      if(initPt > 0.0)
+      {
+         MqlTick seedTicks[];
+         int copied = CopyTicks(m_symbol, seedTicks, COPY_TICKS_INFO, 0, MathMin(m_spreadCap, 120));
+         if(copied > 0)
+         {
+            for(int tIdx = 0; tIdx < copied; tIdx++)
+            {
+               if(seedTicks[tIdx].bid > 0.0 && seedTicks[tIdx].ask >= seedTicks[tIdx].bid)
+               {
+                  double sPts = (seedTicks[tIdx].ask - seedTicks[tIdx].bid) / initPt;
+                  if(sPts >= 0.0 && MathIsValidNumber(sPts))
+                     RecordSpread(sPts);
+               }
+            }
+         }
+      }
+
       return Update();
    }
 
@@ -111,14 +149,14 @@ public:
          return false;
       }
 
-      SSymbolProfile prof = m_symIntel.GetProfile();
-      if(prof.point <= 0.0 || tick.bid <= 0.0 || tick.ask <= 0.0 || tick.ask < tick.bid)
+      double pt = (m_symIntel != NULL) ? m_symIntel.GetPoint() : 0.0;
+      if(pt <= 0.0 || tick.bid <= 0.0 || tick.ask <= 0.0 || tick.ask < tick.bid)
       {
          m_snapshot.dataReady = false;
          return false;
       }
 
-      double spreadPts = (tick.ask - tick.bid) / prof.point;
+      double spreadPts = (tick.ask - tick.bid) / pt;
       RecordSpread(spreadPts);
       double avgSpread = ComputeAverageSpread();
 
@@ -145,6 +183,7 @@ public:
       m_snapshot.symbol          = m_symbol;
       m_snapshot.timeframe       = m_primaryTF;
       m_snapshot.tickTime        = tick.time;
+      m_snapshot.tickTimeMsc     = tick.time_msc;
       m_snapshot.barTime         = curBarTime;
       m_snapshot.bid             = tick.bid;
       m_snapshot.ask             = tick.ask;
@@ -205,7 +244,15 @@ public:
       return (SeriesInfoInteger(m_symbol, tf, SERIES_SYNCHRONIZED) != 0 || MQLInfoInteger(MQL_TESTER) != 0);
    }
 
-   SMarketSnapshot GetSnapshot() const { return m_snapshot; }
+   bool            IsDataReady() const       { return m_snapshot.dataReady; }
+   datetime        GetBarTime() const        { return m_snapshot.barTime; }
+   datetime        GetTickTime() const       { return m_snapshot.tickTime; }
+   string          GetSymbol() const         { return m_symbol; }
+   double          GetSpreadRatio() const    { return m_snapshot.spreadRatio; }
+   double          GetSpreadPoints() const   { return m_snapshot.spreadPoints; }
+   double          GetAvgSpreadPoints() const{ return m_snapshot.avgSpreadPoints; }
+   double          GetClosedClose() const    { return m_snapshot.close; }
+   SMarketSnapshot GetSnapshot() const       { return m_snapshot; }
 };
 
 #endif // __ASEA_MARKET_MARKETDATA_MQH__

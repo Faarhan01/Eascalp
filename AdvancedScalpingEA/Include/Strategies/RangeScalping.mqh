@@ -1,7 +1,7 @@
 //+------------------------------------------------------------------+
 //|                                                RangeScalping.mqh |
 //|                        Advanced Multi-Market MT5 Scalping EA     |
-//|                        v2.0.0 Strategy 5: Mean-Reversion Range   |
+//|                        v2.9.0 Strategy 5: Mean-Reversion Range   |
 //+------------------------------------------------------------------+
 #ifndef __ASEA_STRATEGIES_RANGESCALPING_MQH__
 #define __ASEA_STRATEGIES_RANGESCALPING_MQH__
@@ -50,16 +50,21 @@ public:
          outRejectReason = "Indicators or structure not ready";
          return false;
       }
-      double effMaxAdx = MathMin(m_maxAdx, 22.0);
+      double effMaxAdx = MathMin(m_maxAdx, 20.5);
       if(ctx.ind.adxMain > effMaxAdx)
       {
          outRejectReason = StringFormat("ADX %.1f exceeds range ceiling %.1f", ctx.ind.adxMain, effMaxAdx);
          return false;
       }
+      if(ctx.regime.efficiencyRatio > 0.36)
+      {
+         outRejectReason = StringFormat("Efficiency ratio %.2f too directional for range mean-reversion", ctx.regime.efficiencyRatio);
+         return false;
+      }
 
       double rangeSpan = ctx.structure.rangeHigh - ctx.structure.rangeLow;
       double spreadPrice = ctx.market.spreadPoints * ctx.symbolProfile.point;
-      if(rangeSpan < MathMax(ctx.ind.atr * 2.10, spreadPrice * 10.0))
+      if(rangeSpan < MathMax(ctx.ind.atr * 2.20, spreadPrice * 11.0))
       {
          outRejectReason = "Range width too narrow relative to ATR/spread cost";
          return false;
@@ -75,56 +80,61 @@ public:
 
       double effSlMult = GetEffectiveSlMult(ctx, 0.95);
       double effTpMult = GetEffectiveTpMult(ctx, 0.88);
-      double zoneTol = ctx.ind.atr * 0.45;
+      double zoneTol = ctx.ind.atr * 0.42;
+      double barRange = MathMax(ctx.market.high - ctx.market.low, ctx.symbolProfile.point);
+      double body = MathAbs(ctx.market.close - ctx.market.open);
+      bool bullCloseConv = (ctx.market.close > ctx.market.open) && (body >= barRange * 0.22) && ((ctx.market.close - ctx.market.low) >= barRange * 0.55);
+      bool bearCloseConv = (ctx.market.close < ctx.market.open) && (body >= barRange * 0.22) && ((ctx.market.high - ctx.market.close) >= barRange * 0.55);
+
       bool nearBottom = (ctx.market.low <= ctx.structure.rangeLow + zoneTol) || (ctx.market.low <= ctx.ind.bbLower + zoneTol * 0.35);
       bool nearTop    = (ctx.market.high >= ctx.structure.rangeHigh - zoneTol) || (ctx.market.high >= ctx.ind.bbUpper - zoneTol * 0.35);
-      bool strongHtfBear = (ctx.mtf.higherBias == SIGNAL_SELL && ctx.mtf.alignmentScore <= -0.60);
-      bool strongHtfBull = (ctx.mtf.higherBias == SIGNAL_BUY  && ctx.mtf.alignmentScore >= 0.60);
+      bool strongHtfBear = (ctx.mtf.higherBias == SIGNAL_SELL && (ctx.mtf.weightedScore <= -55.0 || ctx.mtf.intermediateBias == SIGNAL_SELL));
+      bool strongHtfBull = (ctx.mtf.higherBias == SIGNAL_BUY  && (ctx.mtf.weightedScore >= 55.0  || ctx.mtf.intermediateBias == SIGNAL_BUY));
 
       if(nearBottom && !strongHtfBear &&
          (ctx.structure.supportRejectCount >= 1 || ctx.market.low <= ctx.ind.bbLower) &&
-         ctx.ind.rsi <= 42.0 && (ctx.ind.stochK < 40.0 || ctx.ind.wpr < -62.0) &&
-         ctx.market.close > ctx.market.open && ctx.candle.bias != SIGNAL_SELL)
+         ctx.ind.rsi <= 40.0 && (ctx.ind.stochK < 38.0 || ctx.ind.wpr < -64.0) &&
+         bullCloseConv && ctx.candle.bias != SIGNAL_SELL)
       {
          double slStruct = (ctx.market.ask > ctx.structure.rangeLow)
                            ? MathMin(ctx.ind.atr * effSlMult, MathMax(ctx.ind.atr * 0.90, (ctx.market.ask - ctx.structure.rangeLow) + ctx.ind.atr * 0.30))
                            : ctx.ind.atr * effSlMult;
          double slDist = MathMin(ComputeStructuralSLDist(ctx, SIGNAL_BUY, effSlMult, effSlMult * 1.25), slStruct);
          double roomToTop = (ctx.structure.rangeHigh - ctx.market.ask) * 0.82;
-         if(roomToTop < slDist * 1.25)
+         if(roomToTop < slDist * 1.30)
          {
             outRejectReason = "Insufficient range headroom to upper boundary for positive expectancy";
             return false;
          }
-         double midTarget = MathMax(slDist * 1.35, MathMin(ctx.ind.atr * effTpMult, roomToTop));
+         double midTarget = MathMax(slDist * 1.40, MathMin(ctx.ind.atr * effTpMult, roomToTop));
          double rawConf = (ctx.structure.supportRejectCount >= 2) ? 0.80 : 0.72;
          PopulateCommonSignal(outSignal, ctx, SIGNAL_BUY, slDist, midTarget, rawConf,
                               StringFormat("Range lower-boundary bounce (%d rejections) with oversold oscillator", ctx.structure.supportRejectCount),
-                              StringFormat("ADX=%.1f, RSI=%.1f, StochK=%.1f, Width=%.1f ATR", ctx.ind.adxMain, ctx.ind.rsi, ctx.ind.stochK, ctx.structure.rangeWidthAtr),
+                              StringFormat("ADX=%.1f, ER=%.2f, RSI=%.1f, StochK=%.1f, Width=%.1f ATR", ctx.ind.adxMain, ctx.regime.efficiencyRatio, ctx.ind.rsi, ctx.ind.stochK, ctx.structure.rangeWidthAtr),
                               ctx.structure.summary, ctx.candle.name, "None");
          return true;
       }
 
       if(nearTop && !strongHtfBull &&
          (ctx.structure.resistanceRejectCount >= 1 || ctx.market.high >= ctx.ind.bbUpper) &&
-         ctx.ind.rsi >= 58.0 && (ctx.ind.stochK > 60.0 || ctx.ind.wpr > -38.0) &&
-         ctx.market.close < ctx.market.open && ctx.candle.bias != SIGNAL_BUY)
+         ctx.ind.rsi >= 60.0 && (ctx.ind.stochK > 62.0 || ctx.ind.wpr > -36.0) &&
+         bearCloseConv && ctx.candle.bias != SIGNAL_BUY)
       {
          double slStruct = (ctx.structure.rangeHigh > ctx.market.bid)
                            ? MathMin(ctx.ind.atr * effSlMult, MathMax(ctx.ind.atr * 0.90, (ctx.structure.rangeHigh - ctx.market.bid) + ctx.ind.atr * 0.30))
                            : ctx.ind.atr * effSlMult;
          double slDist = MathMin(ComputeStructuralSLDist(ctx, SIGNAL_SELL, effSlMult, effSlMult * 1.25), slStruct);
          double roomToBot = (ctx.market.bid - ctx.structure.rangeLow) * 0.82;
-         if(roomToBot < slDist * 1.25)
+         if(roomToBot < slDist * 1.30)
          {
             outRejectReason = "Insufficient range headroom to lower boundary for positive expectancy";
             return false;
          }
-         double midTarget = MathMax(slDist * 1.35, MathMin(ctx.ind.atr * effTpMult, roomToBot));
+         double midTarget = MathMax(slDist * 1.40, MathMin(ctx.ind.atr * effTpMult, roomToBot));
          double rawConf = (ctx.structure.resistanceRejectCount >= 2) ? 0.80 : 0.72;
          PopulateCommonSignal(outSignal, ctx, SIGNAL_SELL, slDist, midTarget, rawConf,
                               StringFormat("Range upper-boundary fade (%d rejections) with overbought oscillator", ctx.structure.resistanceRejectCount),
-                              StringFormat("ADX=%.1f, RSI=%.1f, StochK=%.1f, Width=%.1f ATR", ctx.ind.adxMain, ctx.ind.rsi, ctx.ind.stochK, ctx.structure.rangeWidthAtr),
+                              StringFormat("ADX=%.1f, ER=%.2f, RSI=%.1f, StochK=%.1f, Width=%.1f ATR", ctx.ind.adxMain, ctx.regime.efficiencyRatio, ctx.ind.rsi, ctx.ind.stochK, ctx.structure.rangeWidthAtr),
                               ctx.structure.summary, ctx.candle.name, "None");
          return true;
       }

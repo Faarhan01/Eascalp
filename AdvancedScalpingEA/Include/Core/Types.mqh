@@ -1,19 +1,25 @@
 //+------------------------------------------------------------------+
 //|                                                        Types.mqh |
 //|                        Advanced Multi-Market MT5 Scalping EA     |
-//|                        v2.0.0 Shared Enumerations & Structures   |
+//|                        v2.9.0 Shared Enumerations & Structures   |
 //+------------------------------------------------------------------+
 #ifndef __ASEA_CORE_TYPES_MQH__
 #define __ASEA_CORE_TYPES_MQH__
 
 #define EA_PROJECT_NAME       "AdvancedScalpingEA"
-#define EA_PROJECT_VERSION    "2.3.0"
+#define EA_PROJECT_VERSION    "2.9.0"
 #define EA_DATA_ROOT          "AdvancedScalpingEA"
-#define EA_MAX_STRATEGIES     7
+#define EA_MAX_STRATEGIES     10
 #define EA_MAX_TF_SLOTS       14
 #define EA_MAX_SYMBOLS        8
 #define EA_MAX_REGIMES        17
 #define EA_MIN_SHARPE_TRADES  10
+
+datetime SafeCurrentTime()
+{
+   datetime t = TimeCurrent();
+   return (t > 0) ? t : TimeLocal();
+}
 
 enum ENUM_EA_OPERATING_MODE
 {
@@ -33,7 +39,23 @@ enum ENUM_ASSET_CLASS
    ASSET_ENERGY       = 6,
    ASSET_CFD          = 7,
    ASSET_SYNTHETIC    = 8,
-   ASSET_CRYPTO       = 9
+   ASSET_CRYPTO       = 9,
+   ASSET_EQUITY       = 10
+};
+
+enum ENUM_ASSET_CLASS_OVERRIDE
+{
+   ASSET_OVERRIDE_AUTO         = 0,  // Auto-Detect Symbol & Market DNA
+   ASSET_OVERRIDE_FOREX_MAJOR  = 1,  // Force Forex Major Profile
+   ASSET_OVERRIDE_FOREX_MINOR  = 2,  // Force Forex Minor / Cross Profile
+   ASSET_OVERRIDE_FOREX_EXOTIC = 3,  // Force Forex Exotic Profile
+   ASSET_OVERRIDE_METAL        = 4,  // Force Metals (XAU/XAG) Profile
+   ASSET_OVERRIDE_INDEX        = 5,  // Force Stock Index Profile
+   ASSET_OVERRIDE_ENERGY       = 6,  // Force Energy CFD Profile
+   ASSET_OVERRIDE_CFD          = 7,  // Force Generic Broker CFD Profile
+   ASSET_OVERRIDE_SYNTHETIC    = 8,  // Force 24/7 Synthetic Index Profile
+   ASSET_OVERRIDE_CRYPTO       = 9,  // Force Crypto CFD Profile
+   ASSET_OVERRIDE_EQUITY       = 10  // Force Equity / Stock CFD Profile
 };
 
 enum ENUM_SIGNAL_DIRECTION
@@ -150,7 +172,10 @@ enum ENUM_STRATEGY_ID
    STRAT_REVERSAL_SCALPING    = 3,
    STRAT_RANGE_SCALPING       = 4,
    STRAT_VOLATILITY_EXPANSION = 5,
-   STRAT_MICRO_MOMENTUM       = 6
+   STRAT_MICRO_MOMENTUM       = 6,
+   STRAT_LIQUIDITY_SWEEP      = 7,
+   STRAT_VWAP_REVERSION       = 8,
+   STRAT_EMA_RIBBON           = 9
 };
 
 enum ENUM_STRATEGY_SUITABILITY
@@ -239,6 +264,15 @@ struct SSymbolProfile
    int                   recommendedSlippagePts;
    double                measuredAvgSlippagePts;
    int                   measuredFillCount;
+   double                medianBarRangeAtr;
+   double                empiricalEffRatio;
+   double                avgWickRatio;
+   double                quantizedStepSize;
+   double                spreadToAtrBaselinePct;
+   double                spikeBarRatio;
+   bool                  empiricalQuantizedStep;
+   bool                  empiricalProfileReady;
+   string                microstructureSummary;
    bool                  isHedgingAccount;
    bool                  sessionOpenNow;
    bool                  isSynthetic24x7;
@@ -266,6 +300,10 @@ struct SSymbolProfile
       typicalAtrPrice = 0.0; typicalSpreadPoints = 0.0; estCommissionPerLot = 0.0;
       pipSize = 0.0001; autoMaxSpreadPts = 350.0; recommendedSlippagePts = 25;
       measuredAvgSlippagePts = 0.0; measuredFillCount = 0;
+      medianBarRangeAtr = 1.0; empiricalEffRatio = 0.25; avgWickRatio = 0.35;
+      quantizedStepSize = 0.0; spreadToAtrBaselinePct = 0.0; spikeBarRatio = 0.0;
+      empiricalQuantizedStep = false; empiricalProfileReady = false;
+      microstructureSummary = "Pending history calibration";
       isHedgingAccount = true;
       sessionOpenNow = false; isSynthetic24x7 = false;
       isStepIndex = false; isSyntheticBurst = false; hasRealVolume = false;
@@ -332,6 +370,7 @@ struct SMarketSnapshot
    string          symbol;
    ENUM_TIMEFRAMES timeframe;
    datetime        tickTime;
+   long            tickTimeMsc;
    datetime        barTime;
    double          bid;
    double          ask;
@@ -354,7 +393,7 @@ struct SMarketSnapshot
 
    void Reset()
    {
-      symbol = ""; timeframe = PERIOD_CURRENT; tickTime = 0; barTime = 0;
+      symbol = ""; timeframe = PERIOD_CURRENT; tickTime = 0; tickTimeMsc = 0; barTime = 0;
       bid = 0.0; ask = 0.0; lastPrice = 0.0; midPrice = 0.0;
       spreadPoints = 0.0; avgSpreadPoints = 0.0; spreadRatio = 1.0;
       open = 0.0; high = 0.0; low = 0.0; close = 0.0;
@@ -442,6 +481,7 @@ struct SIndicatorValues
    double   directionalPersist;  // -1.0 .. +1.0 over last 10 closed bars
    double   priceDisplacementAtr;// (close[0] - close[10]) / atr
    double   emaDistanceAtr;      // (close[0] - emaMedium) / atr
+   double   relativeVolume;      // current closed bar volume / 20-bar avg volume
    double   vwap;
    bool     vwapAvailable;
    bool     bullDivergence;
@@ -463,6 +503,7 @@ struct SIndicatorValues
       stochK = 50.0; stochD = 50.0; cci = 0.0; wpr = -50.0; psar = 0.0;
       momentum = 100.0; roc = 0.0; prevRoc = 0.0; momentumAccel = 0.0;
       directionalPersist = 0.0; priceDisplacementAtr = 0.0; emaDistanceAtr = 0.0;
+      relativeVolume = 1.0;
       vwap = 0.0; vwapAvailable = false;
       bullDivergence = false; bearDivergence = false; momentumExhaustion = false;
       isReady = false;
@@ -486,6 +527,9 @@ struct SStructureState
    double   rangeHigh;
    double   rangeLow;
    double   rangeWidthAtr;
+   double   prevDayHigh;
+   double   prevDayLow;
+   datetime prevDayBarTime;
    bool     hasHH;
    bool     hasHL;
    bool     hasLH;
@@ -512,6 +556,7 @@ struct SStructureState
       nearestSupport = 0.0; nearestResistance = 0.0;
       supportRejectCount = 0; resistanceRejectCount = 0;
       rangeHigh = 0.0; rangeLow = 0.0; rangeWidthAtr = 0.0;
+      prevDayHigh = 0.0; prevDayLow = 0.0; prevDayBarTime = 0;
       hasHH = false; hasHL = false; hasLH = false; hasLL = false;
       tightConsolidation = false; wideConsolidation = false; inConsolidation = false;
       trendContinuation = false; trendExhaustion = false; structuralReversal = false;
@@ -993,8 +1038,8 @@ struct SIntelligenceSummary
       stage1RawObs = "0 observations";
       stage2HistoricalFinding = "Awaiting minimum sample";
       stage3Recommendation = "None";
-      stage4ValidatedConfig = "AutoAdaptive_v2.3.0";
-      stage5ActiveConfig = "AutoAdaptive_v2.3.0";
+      stage4ValidatedConfig = "AutoAdaptive_v2.9";
+      stage5ActiveConfig = "AutoAdaptive_v2.9";
       lastValidationTime = 0;
       researchSummary = "Collecting minimum sample sizes";
    }
@@ -1132,6 +1177,9 @@ string StrategyIdToName(const ENUM_STRATEGY_ID id)
       case STRAT_RANGE_SCALPING:       return "Range Scalping";
       case STRAT_VOLATILITY_EXPANSION: return "Volatility Expansion";
       case STRAT_MICRO_MOMENTUM:       return "Micro-Momentum";
+      case STRAT_LIQUIDITY_SWEEP:      return "Liquidity Sweep";
+      case STRAT_VWAP_REVERSION:       return "VWAP Reversion";
+      case STRAT_EMA_RIBBON:           return "EMA Ribbon Cont.";
    }
    return "Unknown";
 }
@@ -1149,6 +1197,7 @@ string AssetClassToString(const ENUM_ASSET_CLASS ac)
       case ASSET_CFD:          return "Broker CFD";
       case ASSET_SYNTHETIC:    return "Synthetic Index";
       case ASSET_CRYPTO:       return "Crypto CFD";
+      case ASSET_EQUITY:       return "Equity / Stock";
       default:                 return "Unknown";
    }
 }
