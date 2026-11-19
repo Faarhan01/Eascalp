@@ -1,7 +1,7 @@
 //+------------------------------------------------------------------+
 //|                                              DashboardLayout.mqh |
 //|                        Advanced Multi-Market MT5 Scalping EA     |
-//|                        v2.9.0 Responsive Geometry Calculator     |
+//|                        v3.0.0 Responsive Geometry Calculator     |
 //+------------------------------------------------------------------+
 #ifndef __ASEA_DASHBOARD_DASHBOARDLAYOUT_MQH__
 #define __ASEA_DASHBOARD_DASHBOARDLAYOUT_MQH__

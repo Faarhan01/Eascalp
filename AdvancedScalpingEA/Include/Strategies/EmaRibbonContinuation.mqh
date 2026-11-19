@@ -1,7 +1,7 @@
 //+------------------------------------------------------------------+
 //|                                        EmaRibbonContinuation.mqh |
 //|                        Advanced Multi-Market MT5 Scalping EA     |
-//|                        v2.9.0 Strategy 10: Ribbon Trend Thrust   |
+//|                        v3.1.0 Strategy 10: Ribbon Trend Thrust   |
 //+------------------------------------------------------------------+
 #ifndef __ASEA_STRATEGIES_EMARIBBONCONTINUATION_MQH__
 #define __ASEA_STRATEGIES_EMARIBBONCONTINUATION_MQH__
@@ -18,18 +18,18 @@ private:
 public:
    CStrategyEmaRibbonContinuation() : CStrategyBase(STRAT_EMA_RIBBON, "EMA Ribbon Cont.")
    {
-      m_minAdx = 20.0;
+      m_minAdx = 21.0;
       m_maxAdx = 46.0;
-      m_minRvol = 0.80;
+      m_minRvol = 1.00;
    }
 
    void Configure(const bool enabled, const double slMult, const double tpMult, const int minSample,
-                  const double minAdx = 20.0, const double maxAdx = 46.0, const double minRvol = 0.80)
+                  const double minAdx = 21.0, const double maxAdx = 46.0, const double minRvol = 1.00)
    {
       ConfigureBase(enabled, slMult, tpMult, minSample);
-      m_minAdx = MathMax(14.0, minAdx);
+      m_minAdx = MathMax(16.0, minAdx);
       m_maxAdx = MathMax(m_minAdx + 8.0, maxAdx);
-      m_minRvol = MathMax(0.40, MathMin(3.0, minRvol));
+      m_minRvol = MathMax(0.50, MathMin(3.0, minRvol));
    }
 
    virtual ENUM_STRATEGY_SUITABILITY GetRegimeSuitability(const ENUM_MARKET_REGIME regime) const override
@@ -59,14 +59,14 @@ public:
          outRejectReason = "Indicators or structure not ready";
          return false;
       }
-      if(ctx.ind.adxMain < m_minAdx || ctx.ind.adxMain > m_maxAdx)
+      if(ctx.ind.adxMain < m_minAdx || ctx.ind.adxMain > m_maxAdx || (!ctx.ind.adxRising && ctx.ind.adxMain < 23.5))
       {
-         outRejectReason = StringFormat("ADX %.1f outside optimal continuation corridor [%.0f..%.0f]", ctx.ind.adxMain, m_minAdx, m_maxAdx);
+         outRejectReason = StringFormat("ADX %.1f outside continuation corridor or non-expanding", ctx.ind.adxMain);
          return false;
       }
-      if(ctx.ind.momentumExhaustion || MathAbs(ctx.ind.emaDistanceAtr) > 1.65)
+      if(ctx.ind.momentumExhaustion || MathAbs(ctx.ind.emaDistanceAtr) > 1.25)
       {
-         outRejectReason = StringFormat("Overextended (%.2f ATR from EMA21) — refusing chase", ctx.ind.emaDistanceAtr);
+         outRejectReason = StringFormat("Overextended (%.2f ATR > 1.25 from EMA21) — refusing chase", ctx.ind.emaDistanceAtr);
          return false;
       }
       if(ctx.ind.relativeVolume < m_minRvol)
@@ -87,16 +87,21 @@ public:
                           (ctx.market.normalizedBarRangeAtr >= 0.85 && body >= barRange * 0.45);
 
       // Full fanned EMA ribbon + macro SMA alignment
+      bool bullFreshBreak = (ctx.structure.lastEvent == STRUCT_BOS_BULL || ctx.structure.lastEvent == STRUCT_RETEST_BULL);
+      bool bearFreshBreak = (ctx.structure.lastEvent == STRUCT_BOS_BEAR || ctx.structure.lastEvent == STRUCT_RETEST_BEAR);
+
       bool bullRibbon = (ctx.ind.emaFast > ctx.ind.emaMedium &&
                          ctx.ind.emaMedium > ctx.ind.emaSlow &&
                          ctx.ind.emaSlow >= ctx.ind.smaTrend - ctx.ind.atr * 0.25 &&
                          ctx.market.close > ctx.ind.emaFast &&
-                         ctx.ind.adxPlusDI >= ctx.ind.adxMinusDI + 4.0);
+                         ctx.ind.adxPlusDI >= ctx.ind.adxMinusDI + 4.0) &&
+                        (bullFreshBreak || ctx.structure.swingRangePos01 <= 0.78);
       bool bearRibbon = (ctx.ind.emaFast < ctx.ind.emaMedium &&
                          ctx.ind.emaMedium < ctx.ind.emaSlow &&
                          ctx.ind.emaSlow <= ctx.ind.smaTrend + ctx.ind.atr * 0.25 &&
                          ctx.market.close < ctx.ind.emaFast &&
-                         ctx.ind.adxMinusDI >= ctx.ind.adxPlusDI + 4.0);
+                         ctx.ind.adxMinusDI >= ctx.ind.adxPlusDI + 4.0) &&
+                        (bearFreshBreak || ctx.structure.swingRangePos01 >= 0.22);
 
       bool bullCloseConv = (ctx.market.close > ctx.market.open) && ((ctx.market.close - ctx.market.low) >= barRange * 0.60);
       bool bearCloseConv = (ctx.market.close < ctx.market.open) && ((ctx.market.high - ctx.market.close) >= barRange * 0.60);
@@ -106,33 +111,45 @@ public:
 
       if(bullRibbon && pauseRelease && bullCloseConv && bullMtfStrong &&
          ctx.ind.macdHist > 0.0 && ctx.ind.macdHist >= ctx.ind.prevMacdHist &&
-         ctx.ind.rsi >= 50.0 && ctx.ind.rsi <= 68.0 &&
+         ctx.ind.rsi >= 50.0 && ctx.ind.rsi <= 67.0 &&
          ctx.candle.bias != SIGNAL_SELL &&
          (!ctx.ind.vwapAvailable || ctx.market.close >= ctx.ind.vwap))
       {
-         double slDist = ComputeStructuralSLDist(ctx, SIGNAL_BUY, effSlMult, effSlMult * 1.40);
+         double slDist = ComputeStructuralSLDist(ctx, SIGNAL_BUY, effSlMult, effSlMult * 1.25);
+         if(!HasClearRoomToTarget(ctx, SIGNAL_BUY, slDist, bullFreshBreak))
+         {
+            outRejectReason = "Insufficient headroom before active resistance / HTF high";
+            return false;
+         }
          double tpDist = MathMax(slDist * 1.65, ctx.ind.atr * effTpMult * 1.15);
          double conf = (ctx.ind.relativeVolume >= 1.15) ? 0.89 : 0.86;
          PopulateCommonSignal(outSignal, ctx, SIGNAL_BUY, slDist, tpDist, conf,
                               "Bullish full EMA9/21/55/SMA200 ribbon fan continuation thrust",
-                              StringFormat("ADX=%.1f, DI+=%.1f, MTF=%.0f, RVOL=%.2f, RSI=%.1f", ctx.ind.adxMain, ctx.ind.adxPlusDI, ctx.mtf.weightedScore, ctx.ind.relativeVolume, ctx.ind.rsi),
+                              StringFormat("ADX=%.1f, DI+=%.1f, MTF=%.0f, RVOL=%.2f, Ext=%.2fATR", ctx.ind.adxMain, ctx.ind.adxPlusDI, ctx.mtf.weightedScore, ctx.ind.relativeVolume, ctx.ind.emaDistanceAtr),
                               ctx.structure.summary, ctx.candle.name, "None");
+         ComputeOptimalPullbackTrigger(outSignal, ctx, 0.20);
          return true;
       }
 
       if(bearRibbon && pauseRelease && bearCloseConv && bearMtfStrong &&
          ctx.ind.macdHist < 0.0 && ctx.ind.macdHist <= ctx.ind.prevMacdHist &&
-         ctx.ind.rsi <= 50.0 && ctx.ind.rsi >= 32.0 &&
+         ctx.ind.rsi <= 50.0 && ctx.ind.rsi >= 33.0 &&
          ctx.candle.bias != SIGNAL_BUY &&
          (!ctx.ind.vwapAvailable || ctx.market.close <= ctx.ind.vwap))
       {
-         double slDist = ComputeStructuralSLDist(ctx, SIGNAL_SELL, effSlMult, effSlMult * 1.40);
+         double slDist = ComputeStructuralSLDist(ctx, SIGNAL_SELL, effSlMult, effSlMult * 1.25);
+         if(!HasClearRoomToTarget(ctx, SIGNAL_SELL, slDist, bearFreshBreak))
+         {
+            outRejectReason = "Insufficient headroom before active support / HTF low";
+            return false;
+         }
          double tpDist = MathMax(slDist * 1.65, ctx.ind.atr * effTpMult * 1.15);
          double conf = (ctx.ind.relativeVolume >= 1.15) ? 0.89 : 0.86;
          PopulateCommonSignal(outSignal, ctx, SIGNAL_SELL, slDist, tpDist, conf,
                               "Bearish full EMA9/21/55/SMA200 ribbon fan continuation thrust",
-                              StringFormat("ADX=%.1f, DI-=%.1f, MTF=%.0f, RVOL=%.2f, RSI=%.1f", ctx.ind.adxMain, ctx.ind.adxMinusDI, ctx.mtf.weightedScore, ctx.ind.relativeVolume, ctx.ind.rsi),
+                              StringFormat("ADX=%.1f, DI-=%.1f, MTF=%.0f, RVOL=%.2f, Ext=%.2fATR", ctx.ind.adxMain, ctx.ind.adxMinusDI, ctx.mtf.weightedScore, ctx.ind.relativeVolume, ctx.ind.emaDistanceAtr),
                               ctx.structure.summary, ctx.candle.name, "None");
+         ComputeOptimalPullbackTrigger(outSignal, ctx, 0.20);
          return true;
       }
 
@@ -142,15 +159,15 @@ public:
 
    virtual bool ShouldExitPosition(const SManagedPosition &pos, const SAnalysisContext &ctx, string &outExitReason) const override
    {
-      if(pos.holdingSeconds < 240 || !ctx.ind.isReady) return false;
-      if(pos.direction == SIGNAL_BUY && ctx.ind.emaFast < ctx.ind.emaMedium && ctx.ind.macdHist < 0.0)
+      if(pos.holdingSeconds < 900 || !ctx.ind.isReady) return false;
+      if(pos.direction == SIGNAL_BUY && ctx.market.close < ctx.ind.emaSlow && ctx.ind.macdHist < 0.0 && ctx.ind.emaFast < ctx.ind.emaMedium)
       {
-         outExitReason = "EmaRibbon exit: fast EMA crossed below medium EMA with bearish MACD";
+         outExitReason = "EmaRibbon exit: close below EMA55 + bearish ribbon & MACD flip";
          return true;
       }
-      if(pos.direction == SIGNAL_SELL && ctx.ind.emaFast > ctx.ind.emaMedium && ctx.ind.macdHist > 0.0)
+      if(pos.direction == SIGNAL_SELL && ctx.market.close > ctx.ind.emaSlow && ctx.ind.macdHist > 0.0 && ctx.ind.emaFast > ctx.ind.emaMedium)
       {
-         outExitReason = "EmaRibbon exit: fast EMA crossed above medium EMA with bullish MACD";
+         outExitReason = "EmaRibbon exit: close above EMA55 + bullish ribbon & MACD flip";
          return true;
       }
       return false;

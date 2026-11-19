@@ -1,7 +1,7 @@
 //+------------------------------------------------------------------+
 //|                                              TradeValidation.mqh |
 //|                        Advanced Multi-Market MT5 Scalping EA     |
-//|                        v2.9.0 Pre-Execution Validation & Stats   |
+//|                        v3.1.0 Pre-Execution Validation & Stats   |
 //+------------------------------------------------------------------+
 #ifndef __ASEA_TRADING_TRADEVALIDATION_MQH__
 #define __ASEA_TRADING_TRADEVALIDATION_MQH__
@@ -30,15 +30,16 @@ struct SValidationConfig
    int    fridayCutoffHour;
    bool   avoidRolloverWindow;
    int    rolloverBlackoutMinutes;
+   bool   enableAdaptiveDeadHourFilter;
 
    void ResetDefaults()
    {
-      minSignalScore = 60.0;
+      minSignalScore = 64.0;
       maxSpreadPoints = 0.0;
-      maxSpreadRatio = 2.50;
-      maxSpreadAtrPct = 28.0;
-      maxVolatilityRatio = 3.20;
-      minVolatilityRatio = 0.30;
+      maxSpreadRatio = 2.15;
+      maxSpreadAtrPct = 20.0;
+      maxVolatilityRatio = 2.75;
+      minVolatilityRatio = 0.42;
       minRequiredBars = 50;
       requireMtfNoStrongConflict = true;
       allowCounterTrendTrades = false;
@@ -52,6 +53,7 @@ struct SValidationConfig
       fridayCutoffHour = 21;
       avoidRolloverWindow = true;
       rolloverBlackoutMinutes = 20;
+      enableAdaptiveDeadHourFilter = true;
    }
 };
 
@@ -184,7 +186,7 @@ public:
                                   sig.strategyId == STRAT_RANGE_SCALPING ||
                                   sig.strategyId == STRAT_LIQUIDITY_SWEEP ||
                                   sig.strategyId == STRAT_VWAP_REVERSION);
-         if(!isMeanRevOrSweep || sig.compositeScore < (effMinScore + 8.0))
+         if(!isMeanRevOrSweep || sig.compositeScore < (effMinScore + 10.0))
          {
             m_stats.rejMtfConflict++;
             res.rejectionCode = "COUNTER_HTF_BLOCKED";
@@ -283,6 +285,18 @@ public:
          res.rejectionCode = "SESSION_FILTER_BLOCKED";
          res.rejectionReason = "Outside active trading hours, Friday cutoff, or midnight rollover blackout.";
          return res;
+      }
+      if(autoAdaptBySymbol && m_cfg.enableAdaptiveDeadHourFilter)
+      {
+         MqlDateTime hDt;
+         TimeToStruct(market.tickTime, hDt);
+         if(symIntel.IsQuietDeadHour(hDt.hour) && regime.volatilityRatio < 0.85)
+         {
+            m_stats.rejSession++;
+            res.rejectionCode = "DEAD_LIQUIDITY_HOUR";
+            res.rejectionReason = StringFormat("Server hour %02d:00 empirical liquidity/range below 48%% symbol baseline.", hDt.hour);
+            return res;
+         }
       }
 
       // 8. Risk & exposure permissions

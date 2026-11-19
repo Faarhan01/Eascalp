@@ -1,7 +1,7 @@
 //+------------------------------------------------------------------+
 //|                                           HistoricalResearch.mqh |
 //|                        Advanced Multi-Market MT5 Scalping EA     |
-//|                        v2.9.0 OOS, Walk-Forward, MC & ScoreBands |
+//|                        v3.0.0 OOS, Walk-Forward, MC & ScoreBands |
 //+------------------------------------------------------------------+
 #ifndef __ASEA_INTELLIGENCE_HISTORICALRESEARCH_MQH__
 #define __ASEA_INTELLIGENCE_HISTORICALRESEARCH_MQH__

@@ -1,7 +1,7 @@
 //+------------------------------------------------------------------+
 //|                                                 StateManager.mqh |
 //|                        Advanced Multi-Market MT5 Scalping EA     |
-//|                        v2.9.0 Crash/Restart State Persistence    |
+//|                        v3.1.0 Crash/Restart State Persistence    |
 //+------------------------------------------------------------------+
 #ifndef __ASEA_CORE_STATEMANAGER_MQH__
 #define __ASEA_CORE_STATEMANAGER_MQH__
@@ -61,8 +61,8 @@ struct SPersistedState
       signalsGenerated = 0;
       signalsAccepted = 0;
       signalsRejected = 0;
-      lastValidatedConfig = "AutoAdaptive_v2.9";
-      activeConfigVersion = "AutoAdaptive_v2.9";
+      lastValidatedConfig = "AutoAdaptive_v3.1";
+      activeConfigVersion = "AutoAdaptive_v3.1";
       lastValidationTime = 0;
    }
 };

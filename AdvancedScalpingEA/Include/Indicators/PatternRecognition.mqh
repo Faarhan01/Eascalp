@@ -1,7 +1,7 @@
 //+------------------------------------------------------------------+
 //|                                           PatternRecognition.mqh |
 //|                        Advanced Multi-Market MT5 Scalping EA     |
-//|                        v2.9.0 Cached Swing-Based Pattern Engine  |
+//|                        v3.1.0 Cached Swing-Based Pattern Engine  |
 //+------------------------------------------------------------------+
 #ifndef __ASEA_INDICATORS_PATTERNRECOGNITION_MQH__
 #define __ASEA_INDICATORS_PATTERNRECOGNITION_MQH__
@@ -110,12 +110,12 @@ public:
       double h1 = highs[0].price, h2 = highs[1].price;
       double l1 = lows[0].price,  l2 = lows[1].price;
 
-      if(hCount >= 3 && lCount >= 2)
+      if(hCount >= 3 && lCount >= 2 && highs[0].barIndex <= 20)
       {
          double rightS = highs[0].price, head = highs[1].price, leftS = highs[2].price;
          if(head > leftS + tol * 0.5 && head > rightS + tol * 0.5 &&
             MathAbs(leftS - rightS) <= tol * 1.2 &&
-            (highs[2].barIndex - highs[0].barIndex) >= 12)
+            (highs[2].barIndex - highs[0].barIndex) >= 12 && lastClose <= rightS)
          {
             // Measure true neckline trough between right shoulder and left shoulder from bar history
             double leftValley = rates[highs[1].barIndex].low;
@@ -137,12 +137,12 @@ public:
             }
          }
       }
-      if(lCount >= 3 && hCount >= 2)
+      if(lCount >= 3 && hCount >= 2 && lows[0].barIndex <= 20)
       {
          double rightS = lows[0].price, head = lows[1].price, leftS = lows[2].price;
          if(head < leftS - tol * 0.5 && head < rightS - tol * 0.5 &&
             MathAbs(leftS - rightS) <= tol * 1.2 &&
-            (lows[2].barIndex - lows[0].barIndex) >= 12)
+            (lows[2].barIndex - lows[0].barIndex) >= 12 && lastClose >= rightS)
          {
             // Measure true neckline peak between right shoulder and left shoulder from bar history
             double leftPeak = rates[lows[1].barIndex].high;
@@ -165,16 +165,17 @@ public:
          }
       }
 
-      if(MathAbs(h1 - h2) <= tol && (highs[1].barIndex - highs[0].barIndex) >= 6)
+      if(highs[0].barIndex <= 20 && MathAbs(h1 - h2) <= tol && (highs[1].barIndex - highs[0].barIndex) >= 6)
       {
          // Scan bars strictly between the two swing highs for genuine intervening valley
+         double invLevel = MathMax(h1, h2) + tol * 0.5;
          double valley = rates[highs[0].barIndex].low;
          for(int b = highs[0].barIndex; b <= highs[1].barIndex && b < total; b++)
             if(rates[b].low < valley) valley = rates[b].low;
-         if((MathMax(h1, h2) - valley) >= effAtr * 1.5)
+         if(lastClose <= invLevel && (MathMax(h1, h2) - valley) >= effAtr * 1.5)
          {
             m_signal.pattern = PATTERN_DOUBLE_TOP; m_signal.bias = SIGNAL_SELL;
-            m_signal.breakoutLevel = valley; m_signal.invalidationLevel = MathMax(h1, h2) + tol * 0.5;
+            m_signal.breakoutLevel = valley; m_signal.invalidationLevel = invLevel;
             m_signal.confidence = (lastClose < valley) ? 0.85 : 0.65;
             m_signal.name = "Double Top";
             m_signal.note = StringFormat("Peaks ~%.5f | Neck %.5f", (h1 + h2) * 0.5, valley);
@@ -182,16 +183,17 @@ public:
             return true;
          }
       }
-      if(MathAbs(l1 - l2) <= tol && (lows[1].barIndex - lows[0].barIndex) >= 6)
+      if(lows[0].barIndex <= 20 && MathAbs(l1 - l2) <= tol && (lows[1].barIndex - lows[0].barIndex) >= 6)
       {
          // Scan bars strictly between the two swing lows for genuine intervening peak
+         double invLevel = MathMin(l1, l2) - tol * 0.5;
          double peak = rates[lows[0].barIndex].high;
          for(int b = lows[0].barIndex; b <= lows[1].barIndex && b < total; b++)
             if(rates[b].high > peak) peak = rates[b].high;
-         if((peak - MathMin(l1, l2)) >= effAtr * 1.5)
+         if(lastClose >= invLevel && (peak - MathMin(l1, l2)) >= effAtr * 1.5)
          {
             m_signal.pattern = PATTERN_DOUBLE_BOTTOM; m_signal.bias = SIGNAL_BUY;
-            m_signal.breakoutLevel = peak; m_signal.invalidationLevel = MathMin(l1, l2) - tol * 0.5;
+            m_signal.breakoutLevel = peak; m_signal.invalidationLevel = invLevel;
             m_signal.confidence = (lastClose > peak) ? 0.85 : 0.65;
             m_signal.name = "Double Bottom";
             m_signal.note = StringFormat("Troughs ~%.5f | Neck %.5f", (l1 + l2) * 0.5, peak);

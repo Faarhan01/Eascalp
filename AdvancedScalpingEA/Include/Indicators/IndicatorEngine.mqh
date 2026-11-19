@@ -1,7 +1,7 @@
 //+------------------------------------------------------------------+
 //|                                              IndicatorEngine.mqh |
 //|                        Advanced Multi-Market MT5 Scalping EA     |
-//|                        v2.9.0 Cached Volatility & Momentum Suite |
+//|                        v3.1.0 Cached Volatility & Momentum Suite |
 //+------------------------------------------------------------------+
 #ifndef __ASEA_INDICATORS_INDICATORENGINE_MQH__
 #define __ASEA_INDICATORS_INDICATORENGINE_MQH__
@@ -92,9 +92,10 @@ private:
       return true;
    }
 
-   bool ComputeSessionVWAP(const CMarketData &data, const bool hasRealVol, double &outVwap) const
+   bool ComputeSessionVWAP(const CMarketData &data, const bool hasRealVol, double &outVwap, double &outStdDev) const
    {
       outVwap = 0.0;
+      outStdDev = 0.0;
       MqlRates rates[];
       if(!data.CopyAvailableClosedRates(m_tf, 5, 96, rates))
          return false;
@@ -119,12 +120,13 @@ private:
          sessionBars++;
       }
 
+      int usedCount = sessionBars;
       // Rolling 48-bar fallback right after midnight UTC on 24/7 synthetics (e.g. Step Index / Crypto)
       if(sessionBars < 8)
       {
          sumPV = 0.0; sumV = 0.0;
-         int rollN = MathMin(48, total);
-         for(int i = 0; i < rollN; i++)
+         usedCount = MathMin(48, total);
+         for(int i = 0; i < usedCount; i++)
          {
             double vol = hasRealVol && rates[i].real_volume > 0 ? (double)rates[i].real_volume : (double)rates[i].tick_volume;
             if(vol <= 0.0) continue;
@@ -136,6 +138,17 @@ private:
 
       if(sumV <= 0.0) return false;
       outVwap = sumPV / sumV;
+
+      double varSum = 0.0;
+      for(int i = 0; i < usedCount; i++)
+      {
+         double vol = hasRealVol && rates[i].real_volume > 0 ? (double)rates[i].real_volume : (double)rates[i].tick_volume;
+         if(vol <= 0.0) continue;
+         double typical = (rates[i].high + rates[i].low + rates[i].close) / 3.0;
+         double diff = typical - outVwap;
+         varSum += vol * diff * diff;
+      }
+      outStdDev = MathSqrt(MathMax(0.0, varSum / sumV));
       return true;
    }
 
@@ -240,6 +253,9 @@ public:
          m_values.atrShort = m_values.atr;
 
       ok &= ReadBufferShift(m_hAdx,   0, shift, m_values.adxMain);
+      if(!ReadBufferShift(m_hAdx, 0, shift + 1, m_values.adxPrev))
+         m_values.adxPrev = m_values.adxMain;
+      m_values.adxRising = (m_values.adxMain > m_values.adxPrev + 0.15);
       ok &= ReadBufferShift(m_hAdx,   1, shift, m_values.adxPlusDI);
       ok &= ReadBufferShift(m_hAdx,   2, shift, m_values.adxMinusDI);
       ok &= ReadBufferShift(m_hBands, 0, shift, m_values.bbMiddle);
@@ -407,6 +423,8 @@ public:
             m_values.donchianHigh = dcH;
             m_values.donchianLow  = dcL;
             m_values.donchianMid  = (dcH + dcL) * 0.5;
+            double dcSpan = dcH - dcL;
+            m_values.donchianPos01 = (dcSpan > 0.0) ? MathMax(0.0, MathMin(1.0, (rates[0].close - dcL) / dcSpan)) : 0.5;
          }
 
          // Momentum exhaustion: true overextension (>2.15 ATR + fading MACD + extreme RSI) or active divergence
@@ -418,7 +436,16 @@ public:
       }
 
       if(m_cfg.enableVWAP)
-         m_values.vwapAvailable = ComputeSessionVWAP(data, hasRealVolume, m_values.vwap);
+      {
+         m_values.vwapAvailable = ComputeSessionVWAP(data, hasRealVolume, m_values.vwap, m_values.vwapStdDev);
+         if(m_values.vwapAvailable && m_values.vwap > 0.0)
+         {
+            double closedC = data.GetClosedClose();
+            double denom = MathMax(m_values.vwapStdDev, m_values.atr * 0.35);
+            if(denom > 0.0)
+               m_values.vwapZScore = (closedC - m_values.vwap) / denom;
+         }
+      }
 
       m_values.isReady = true;
       m_lastUpdatedBar = barT;

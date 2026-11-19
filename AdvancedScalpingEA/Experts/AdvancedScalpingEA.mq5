@@ -1,12 +1,12 @@
 //+------------------------------------------------------------------+
 //|                                           AdvancedScalpingEA.mq5 |
 //|                        Advanced Multi-Market MT5 Scalping EA     |
-//|                        v2.9.0 Intelligent Multi-Market Scalper   |
+//|                        v3.1.0 Universal Symbol & Sniper Scalper |
 //+------------------------------------------------------------------+
 #property copyright "AdvancedScalpingEA Quantitative Systems"
 #property link      "https://www.mql5.com"
-#property version   "2.90"
-#property description "v2.9.0 Performance & Architecture Edition: Single-Pass O(1)-Amortized Deal History Ledger, Idle-Tick Fast Path & Zero-Copy Hot-Path Caching, O(1) Spread Ring Sum, Cached Monte Carlo P95 Analytics, Pre-Allocated Tick Buffers, and Out-of-the-Box Multi-Asset Scalping."
+#property version   "3.10"
+#property description "v3.1.0 Universal Symbol DNA & Extremum Sniper Edition: 240-Bar Empirical Symbol Personality & 24h Liquidity Filter, Graph Discount/Premium Extremum & H1 Wall Gates, Live Pullback Extremum Entry Sniper, Non-Clipping >=1.05R BE & 3.20 ATR Runners, and Zero-Preset Multi-Asset Execution."
 
 #include "../Include/Core/Types.mqh"
 #include "../Include/Core/EAController.mqh"
@@ -18,7 +18,7 @@ input ENUM_EA_OPERATING_MODE InpOperatingMode    = EA_MODE_LIVE_TRADING; // Oper
 input bool   InpAllowLiveTrading                 = true;                  // Allow Live Real-Account Orders
 input bool   InpConfirmLiveRiskAcknowledgement     = true;                  // Confirm Real-Account Risk Acknowledgement
 input long   InpMagicNumber                      = 510299;                // Unique EA Magic Number
-input string InpConfigLabel                      = "AutoAdaptive_v2.9";   // Configuration Label for Logs
+input string InpConfigLabel                      = "AutoAdaptive_v3.1";   // Configuration Label for Logs
 
 //--- 2. Symbol Settings
 input group "=== 2. Symbol Settings ==="
@@ -66,7 +66,7 @@ input int    InpSwingStrength                    = 3;                     // Swi
 input int    InpStructureLookback                = 120;                   // Structure Lookback (Closed Bars)
 input double InpZoneAtrMult                      = 0.35;                  // S/R Zone Tolerance (x ATR)
 input double InpAdxStrongThreshold               = 26.0;                  // Strong Trend ADX Threshold
-input double InpAdxWeakThreshold                 = 17.0;                  // Weak Trend ADX Threshold
+input double InpAdxWeakThreshold                 = 18.0;                  // Weak Trend ADX Threshold
 
 //--- 7. Candlestick Recognition
 input group "=== 7. Candlestick Recognition ==="
@@ -86,32 +86,35 @@ input bool   InpEnableBreakoutScalp              = true;                  // Str
 input bool   InpEnableReversalScalp              = true;                  // Strategy 4: Reversal Scalping
 input bool   InpEnableRangeScalp                 = true;                  // Strategy 5: Range Scalping
 input bool   InpEnableVolExpansion               = true;                  // Strategy 6: Volatility Expansion
-input bool   InpEnableMicroMomentum              = true;                  // Strategy 7: Micro-Momentum
+input bool   InpEnableMicroMomentum              = false;                 // Strategy 7: Micro-Momentum (Noisy Tick Burst)
 input bool   InpEnableLiquiditySweep             = true;                  // Strategy 8: Liquidity Sweep Rejection
 input bool   InpEnableVwapReversion              = true;                  // Strategy 9: VWAP Mean Reversion
 input bool   InpEnableEmaRibbon                  = true;                  // Strategy 10: EMA Ribbon Continuation
-input double InpDefaultSlAtrMult                 = 1.60;                  // Default Stop-Loss (x ATR)
-input double InpDefaultTpAtrMult                 = 2.80;                  // Default Take-Profit (x ATR)
+input double InpDefaultSlAtrMult                 = 1.65;                  // Default Stop-Loss (x ATR)
+input double InpDefaultTpAtrMult                 = 3.20;                  // Default Take-Profit (x ATR)
 input bool   InpSnapTpBeforeMajorWalls           = true;                  // Snap TP Cleanly Inside Major S/R & PDH/PDL Walls
-input double InpMinBreakoutRvol                  = 0.72;                  // Minimum Relative Volume (RVOL) on Breakouts
+input double InpMinBreakoutRvol                  = 1.10;                  // Minimum Relative Volume (RVOL) on Breakouts
 input bool   InpEvaluateOnNewBarOnly             = true;                  // Evaluate Entries Only on New Closed Bar
+input bool   InpEnableExtremumEntrySniper        = true;                  // Wait for Pullback Extremum on Extended Impulses
+input int    InpExtremumSniperWaitBars           = 2;                     // Max Bars to Wait for Pullback Sniper Trigger (0-6)
+input double InpExtremumPullbackMinAtr           = 0.20;                  // Min Improvement (x ATR) to Arm Entry Sniper
 
 //--- 10. Signal Scoring & Expectancy
 input group "=== 10. Signal Scoring & Expectancy ==="
-input double InpMinSignalScore                   = 60.0;                  // Minimum Signal Score (0 - 100)
+input double InpMinSignalScore                   = 64.0;                  // Minimum Signal Score (0 - 100)
 input int    InpMinConsensusStrategies           = 1;                     // Min Agreeing Strategies (1 = Best Single Setup)
-input double InpMinRewardRiskRatio               = 1.30;                  // Minimum Structural Reward:Risk Ratio
-input double InpMinTpToCostRatio                 = 2.20;                  // Minimum TP Value / Total Execution Cost
+input double InpMinRewardRiskRatio               = 1.55;                  // Minimum Structural Reward:Risk Ratio
+input double InpMinTpToCostRatio                 = 2.60;                  // Minimum TP Value / Total Execution Cost
 input double InpEstimatedSlippagePoints          = 2.0;                   // Baseline Pre-Fill Slippage Floor (Points)
 input bool   InpRequireViableExpectancy          = true;                  // Require Economically Viable Expectancy
 
 //--- 11. Trade Validation
 input group "=== 11. Trade Validation ==="
 input double InpMaxSpreadPoints                  = 0.0;                   // Maximum Allowed Spread (Points, 0 = Auto-Adaptive)
-input double InpMaxSpreadRatio                   = 2.50;                  // Maximum Spread Expansion Ratio
-input double InpMaxSpreadAtrPct                  = 28.0;                  // Maximum Spread as % of ATR
-input double InpMaxVolatilityRatio               = 3.20;                  // Maximum ATR Volatility Ratio
-input double InpMinVolatilityRatio               = 0.30;                  // Minimum ATR Volatility Ratio
+input double InpMaxSpreadRatio                   = 2.15;                  // Maximum Spread Expansion Ratio
+input double InpMaxSpreadAtrPct                  = 20.0;                  // Maximum Spread as % of ATR
+input double InpMaxVolatilityRatio               = 2.75;                  // Maximum ATR Volatility Ratio
+input double InpMinVolatilityRatio               = 0.42;                  // Minimum ATR Volatility Ratio
 input int    InpMinRequiredBars                  = 50;                    // Minimum Historical Bars Required
 input bool   InpRequireMtfNoStrongConflict       = true;                  // Block Trades on Strong MTF Conflict
 input bool   InpAllowCounterTrendTrades          = false;                 // Allow Unconstrained Counter-HTF Entries
@@ -146,35 +149,35 @@ input bool   InpEmergencyStopNewEntries          = false;                 // Eme
 //--- 13. Position Management
 input group "=== 13. Position Management ==="
 input bool   InpEnableBreakEven                  = true;                  // Enable Cost-Covering Break-Even Protection
-input double InpBreakEvenTriggerAtr              = 1.45;                  // Break-Even Trigger (x ATR)
+input double InpBreakEvenTriggerAtr              = 1.65;                  // Break-Even Trigger (x ATR)
 input double InpBreakEvenLockAtr                 = 0.15;                  // Break-Even Lock Offset (x ATR)
 input double InpBreakEvenCostPaddingMult         = 1.25;                  // Cost-Covering Break-Even Padding Multiplier
-input bool   InpEnablePartialClose               = true;                  // Enable Partial Take-Profit Scaling
-input double InpPartialCloseTriggerAtr           = 1.90;                  // Partial Close Profit Trigger (x ATR)
-input double InpPartialCloseFraction             = 0.40;                  // Partial Close Volume Fraction (0.20 - 0.75)
+input bool   InpEnablePartialClose               = false;                 // Enable Partial Take-Profit Scaling
+input double InpPartialCloseTriggerAtr           = 2.60;                  // Partial Close Profit Trigger (x ATR)
+input double InpPartialCloseFraction             = 0.30;                  // Partial Close Volume Fraction (0.20 - 0.75)
 input bool   InpMoveToBEOnPartialClose           = true;                  // Move Stop-Loss to Cost-BE on Partial Profit Close
 input bool   InpEnableTrailingStop               = true;                  // Enable ATR Trailing Stop
 input bool   InpUseProgressiveTrail              = true;                  // Compress Trail Multiplier in Extended Profit
 input bool   InpUseChandelierTrail               = true;                  // Anchor Trail from Peak Favorable Excursion
 input bool   InpTrailAlongStructureSwings        = true;                  // Lock Profit Behind Confirmed Structure Swings
 input bool   InpTightenTrailNearMaxHold          = true;                  // Tighten Trailing Stop Past 70% of Max Hold Time
-input double InpTrailingStartAtr                 = 2.00;                  // Trailing Start Profit (x ATR)
-input double InpTrailingStepAtr                  = 1.00;                  // Trailing Stop Distance (x ATR)
+input double InpTrailingStartAtr                 = 2.40;                  // Trailing Start Profit (x ATR)
+input double InpTrailingStepAtr                  = 1.25;                  // Trailing Stop Distance (x ATR)
 input bool   InpEnableStrategyExit               = true;                  // Enable Strategy-Specific Early Exit Hook
 input bool   InpEnableOppositeSignalExit         = false;                 // Close Position on Strong Opposite Signal
-input double InpOppositeExitMinScore             = 74.0;                  // Min Score for Opposite-Signal Position Close
-input bool   InpEnableStructureExit              = true;                  // Exit on Momentum-Confirmed CHoCH Reversal
+input double InpOppositeExitMinScore             = 76.0;                  // Min Score for Opposite-Signal Position Close
+input bool   InpEnableStructureExit              = false;                 // Exit on Momentum-Confirmed CHoCH Reversal
 input bool   InpEnableMomentumExit               = false;                 // Exit on Sustained Momentum Deterioration
 input bool   InpEnableMaxHoldExit                = true;                  // Exit at Max Holding Duration
-input int    InpMaxHoldingMinutes                = 180;                   // Max Holding Duration (Minutes)
+input int    InpMaxHoldingMinutes                = 360;                   // Max Holding Duration (Minutes)
 input bool   InpCloseBeforeWeekend               = false;                 // Close Open Non-24x7 Positions Late Friday
 input int    InpFridayCloseHour                  = 21;                    // Friday Pre-Weekend Close Hour (Server Time)
 
 //--- 14. Trading Filters
 input group "=== 14. Trading Filters ==="
-input int    InpLossCooldownBars                 = 3;                     // Per-Symbol Cooldown Bars After Loss (0 = Off)
-input int    InpMaxTradesPerHour                 = 3;                     // Max Executed Entries Per Hour (0 = Unlimited)
-input int    InpMaxDailyTrades                   = 12;                    // Max Executed Entries Per Day (0 = Unlimited)
+input int    InpLossCooldownBars                 = 4;                     // Per-Symbol Cooldown Bars After Loss (0 = Off)
+input int    InpMaxTradesPerHour                 = 2;                     // Max Executed Entries Per Hour (0 = Unlimited)
+input int    InpMaxDailyTrades                   = 8;                     // Max Executed Entries Per Day (0 = Unlimited)
 input bool   InpEnableSessionFilter              = false;                 // Restrict to Configured Session Hours
 input int    InpSessionStartHour                 = 7;                     // Session Start Hour (Server Time)
 input int    InpSessionEndHour                   = 21;                    // Session End Hour (Server Time)
@@ -182,13 +185,14 @@ input bool   InpAvoidFridayLateHours             = false;                 // Blo
 input int    InpFridayCutoffHour                 = 21;                    // Friday Cutoff Hour (Server Time)
 input bool   InpAvoidRolloverWindow              = true;                  // Block New Entries Around Midnight Rollover (FX/CFD)
 input int    InpRolloverBlackoutMinutes          = 20;                    // Rollover Blackout Window (+/- Minutes Around 00:00)
+input bool   InpEnableAdaptiveDeadHourFilter     = true;                  // Auto-Skip Empirical Dead-Liquidity Server Hours
 
 //--- 15. Learning & Research
 input group "=== 15. Learning & Research ==="
 input bool   InpAutoSelectBestStrategy           = false;                 // Filter to Top Ranked Strategy (After Min Sample)
-input int    InpMinStrategySampleSize            = 20;                    // Minimum Trades Before Strategy Selection
+input int    InpMinStrategySampleSize            = 15;                    // Minimum Trades Before Strategy Selection
 input bool   InpEnableAdaptiveEvaluation         = true;                  // Enable 5-Stage Non-Mutating Research
-input double InpDeteriorationPfFloor             = 0.85;                  // Profit Factor Deterioration Warning Floor
+input double InpDeteriorationPfFloor             = 0.92;                  // Profit Factor Deterioration Warning Floor
 input int    InpWalkForwardDays                  = 14;                    // Walk-Forward Fold Window (Days)
 input double InpOosSplitRatio                    = 0.30;                  // Out-of-Sample Fold Ratio (0.10 - 0.50)
 
@@ -262,6 +266,10 @@ bool ValidateInputs(string &outErr)
    { outErr = "InpRolloverBlackoutMinutes must be between 0 and 90."; return false; }
    if(InpMinBreakoutRvol < 0.40 || InpMinBreakoutRvol > 3.0)
    { outErr = "InpMinBreakoutRvol must be between 0.40 and 3.0."; return false; }
+   if(InpExtremumSniperWaitBars < 0 || InpExtremumSniperWaitBars > 6)
+   { outErr = "InpExtremumSniperWaitBars must be between 0 and 6."; return false; }
+   if(InpExtremumPullbackMinAtr < 0.05 || InpExtremumPullbackMinAtr > 1.0)
+   { outErr = "InpExtremumPullbackMinAtr must be between 0.05 and 1.0."; return false; }
    return true;
 }
 
@@ -349,6 +357,9 @@ int OnInit()
    cfg.snapTpBeforeMajorWalls = InpSnapTpBeforeMajorWalls;
    cfg.minBreakoutRvol        = InpMinBreakoutRvol;
    cfg.evaluateOnNewBarOnly   = InpEvaluateOnNewBarOnly;
+   cfg.enableExtremumEntrySniper = InpEnableExtremumEntrySniper;
+   cfg.extremumSniperWaitBars = InpExtremumSniperWaitBars;
+   cfg.extremumPullbackMinAtr = InpExtremumPullbackMinAtr;
 
    cfg.expCfg.minRewardRiskRatio     = InpMinRewardRiskRatio;
    cfg.expCfg.minTpToCostRatio       = InpMinTpToCostRatio;
@@ -374,6 +385,7 @@ int OnInit()
    cfg.valCfg.fridayCutoffHour           = InpFridayCutoffHour;
    cfg.valCfg.avoidRolloverWindow        = InpAvoidRolloverWindow;
    cfg.valCfg.rolloverBlackoutMinutes    = InpRolloverBlackoutMinutes;
+   cfg.valCfg.enableAdaptiveDeadHourFilter = InpEnableAdaptiveDeadHourFilter;
 
    cfg.riskCfg.riskPerTradePct           = InpRiskPerTradePct;
    cfg.riskCfg.maxRiskPerTradePct        = InpMaxRiskPerTradePct;

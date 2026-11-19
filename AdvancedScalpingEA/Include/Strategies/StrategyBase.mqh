@@ -1,7 +1,7 @@
 //+------------------------------------------------------------------+
 //|                                                 StrategyBase.mqh |
 //|                        Advanced Multi-Market MT5 Scalping EA     |
-//|                        v2.9.0 Independent Strategy Interface     |
+//|                        v3.1.0 Positive-Expectancy Strategy Base|
 //+------------------------------------------------------------------+
 #ifndef __ASEA_STRATEGIES_STRATEGYBASE_MQH__
 #define __ASEA_STRATEGIES_STRATEGYBASE_MQH__
@@ -117,6 +117,56 @@ protected:
       return MathMax(minStop, MathMin(maxDist, structDist));
    }
 
+   bool HasClearRoomToTarget(const SAnalysisContext &ctx, const ENUM_SIGNAL_DIRECTION dir,
+                             const double slDist, const bool allowLocalBreakout = false) const
+   {
+      if(!ctx.structure.isReady || ctx.ind.atr <= 0.0 || slDist <= 0.0)
+         return true;
+
+      double reqRoom = MathMax(ctx.ind.atr * 0.90, slDist * 1.45);
+      double refPrice = (dir == SIGNAL_BUY) ? ctx.market.ask : ctx.market.bid;
+      if(refPrice <= 0.0)
+         refPrice = ctx.market.close;
+
+      if(dir == SIGNAL_BUY)
+      {
+         if(!allowLocalBreakout && ctx.structure.nearestResistance > refPrice && ctx.structure.resistanceRejectCount >= 2)
+         {
+            if((ctx.structure.nearestResistance - refPrice) < reqRoom)
+               return false;
+         }
+         if(ctx.structure.prevDayHigh > refPrice && ctx.market.close <= ctx.structure.prevDayHigh + ctx.ind.atr * 0.08)
+         {
+            if((ctx.structure.prevDayHigh - refPrice) < reqRoom * 0.85)
+               return false;
+         }
+         if(ctx.structure.htfSwingHigh > refPrice && ctx.market.close <= ctx.structure.htfSwingHigh + ctx.ind.atr * 0.12)
+         {
+            if((ctx.structure.htfSwingHigh - refPrice) < reqRoom * 0.90)
+               return false;
+         }
+      }
+      else if(dir == SIGNAL_SELL)
+      {
+         if(!allowLocalBreakout && ctx.structure.nearestSupport > 0.0 && ctx.structure.nearestSupport < refPrice && ctx.structure.supportRejectCount >= 2)
+         {
+            if((refPrice - ctx.structure.nearestSupport) < reqRoom)
+               return false;
+         }
+         if(ctx.structure.prevDayLow > 0.0 && ctx.structure.prevDayLow < refPrice && ctx.market.close >= ctx.structure.prevDayLow - ctx.ind.atr * 0.08)
+         {
+            if((refPrice - ctx.structure.prevDayLow) < reqRoom * 0.85)
+               return false;
+         }
+         if(ctx.structure.htfSwingLow > 0.0 && ctx.structure.htfSwingLow < refPrice && ctx.market.close >= ctx.structure.htfSwingLow - ctx.ind.atr * 0.12)
+         {
+            if((refPrice - ctx.structure.htfSwingLow) < reqRoom * 0.90)
+               return false;
+         }
+      }
+      return true;
+   }
+
    double ApplyStructuralTargetSnap(const SAnalysisContext &ctx, const ENUM_SIGNAL_DIRECTION dir,
                                     const double entryPrice, const double actualSlDist,
                                     const double rawTpDist, const double minStop) const
@@ -124,7 +174,7 @@ protected:
       if(!m_snapTpBeforeWalls || !ctx.structure.isReady || ctx.ind.atr <= 0.0 || entryPrice <= 0.0)
          return rawTpDist;
 
-      double minRewardFloor = MathMax(minStop, actualSlDist * 1.40);
+      double minRewardFloor = MathMax(minStop, actualSlDist * 1.55);
       if(rawTpDist <= minRewardFloor)
          return rawTpDist;
 
@@ -145,6 +195,12 @@ protected:
             if(cand >= minRewardFloor && cand < snappedDist)
                snappedDist = cand;
          }
+         if(ctx.structure.htfSwingHigh > entryPrice)
+         {
+            double cand = (ctx.structure.htfSwingHigh - wallPad) - entryPrice;
+            if(cand >= minRewardFloor && cand < snappedDist)
+               snappedDist = cand;
+         }
       }
       else if(dir == SIGNAL_SELL)
       {
@@ -160,8 +216,48 @@ protected:
             if(cand >= minRewardFloor && cand < snappedDist)
                snappedDist = cand;
          }
+         if(ctx.structure.htfSwingLow > 0.0 && ctx.structure.htfSwingLow < entryPrice)
+         {
+            double cand = entryPrice - (ctx.structure.htfSwingLow + wallPad);
+            if(cand >= minRewardFloor && cand < snappedDist)
+               snappedDist = cand;
+         }
       }
       return MathMax(minStop, snappedDist);
+   }
+
+   void ComputeOptimalPullbackTrigger(STradeSignal &sig, const SAnalysisContext &ctx,
+                                    const double minImproveAtr = 0.20, const double customIdealPrice = 0.0) const
+   {
+      if(!sig.isValid || ctx.ind.atr <= 0.0 || sig.entryPrice <= 0.0)
+         return;
+
+      double atr = ctx.ind.atr;
+      double midBar = (ctx.market.high + ctx.market.low) * 0.50;
+      double minImprove = atr * MathMax(0.10, minImproveAtr);
+
+      if(sig.direction == SIGNAL_BUY)
+      {
+         double fallbackCand = MathMin(ctx.ind.emaFast + atr * 0.10, midBar + atr * 0.08);
+         double targetCand = (customIdealPrice > 0.0) ? customIdealPrice : fallbackCand;
+         double minSafeFloor = sig.stopLoss + atr * 0.40;
+         if(targetCand > minSafeFloor && (sig.entryPrice - targetCand) >= minImprove)
+         {
+            sig.optimalEntryPrice    = NormalizePriceTick(ctx.symbolProfile, targetCand);
+            sig.requiresPullbackWait = true;
+         }
+      }
+      else if(sig.direction == SIGNAL_SELL)
+      {
+         double fallbackCand = MathMax(ctx.ind.emaFast - atr * 0.10, midBar - atr * 0.08);
+         double targetCand = (customIdealPrice > 0.0) ? customIdealPrice : fallbackCand;
+         double maxSafeCeil = sig.stopLoss - atr * 0.40;
+         if(targetCand < maxSafeCeil && (targetCand - sig.entryPrice) >= minImprove)
+         {
+            sig.optimalEntryPrice    = NormalizePriceTick(ctx.symbolProfile, targetCand);
+            sig.requiresPullbackWait = true;
+         }
+      }
    }
 
    void PopulateCommonSignal(STradeSignal &sig, const SAnalysisContext &ctx, const ENUM_SIGNAL_DIRECTION dir,
@@ -183,7 +279,7 @@ protected:
       sl = NormalizePriceTick(ctx.symbolProfile, sl);
 
       double actualSlDist = MathAbs(sig.entryPrice - sl);
-      double targetRR     = (slDist > 0.0 && tpDist > 0.0) ? MathMax(1.30, tpDist / slDist) : 1.50;
+      double targetRR     = (slDist > 0.0 && tpDist > 0.0) ? MathMax(1.55, tpDist / slDist) : 1.75;
       double minStop      = MathMax((double)(MathMax(ctx.symbolProfile.stopsLevelPoints, ctx.symbolProfile.freezeLevelPoints) + 4) * ctx.symbolProfile.point,
                                     ctx.symbolProfile.tickSize * 5.0);
       double effTpDist    = MathMax(MathMax(tpDist, minStop), actualSlDist * targetRR);
@@ -212,9 +308,9 @@ public:
       m_enabled = true;
       m_autoAdaptBySymbol = true;
       m_snapTpBeforeWalls = true;
-      m_slAtrMult = 1.60;
-      m_tpAtrMult = 2.80;
-      m_minSampleSize = 20;
+      m_slAtrMult = 1.65;
+      m_tpAtrMult = 3.20;
+      m_minSampleSize = 15;
       m_recentHead = 0;
       m_recentCount = 0;
       m_equityPeak = 0.0;

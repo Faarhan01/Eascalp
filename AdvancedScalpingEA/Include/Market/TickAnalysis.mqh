@@ -1,7 +1,7 @@
 //+------------------------------------------------------------------+
 //|                                                 TickAnalysis.mqh |
 //|                        Advanced Multi-Market MT5 Scalping EA     |
-//|                        v2.9.0 Cost-Aware Tick Intelligence       |
+//|                        v3.0.0 Cost-Aware Tick Intelligence       |
 //+------------------------------------------------------------------+
 #ifndef __ASEA_MARKET_TICKANALYSIS_MQH__
 #define __ASEA_MARKET_TICKANALYSIS_MQH__

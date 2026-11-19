@@ -1,7 +1,7 @@
 //+------------------------------------------------------------------+
 //|                                         PerformanceAnalytics.mqh |
 //|                        Advanced Multi-Market MT5 Scalping EA     |
-//|                        v2.9.0 Magic-Isolated MFE/MAE & Buckets   |
+//|                        v3.0.0 Magic-Isolated MFE/MAE & Buckets   |
 //+------------------------------------------------------------------+
 #ifndef __ASEA_ANALYTICS_PERFORMANCEANALYTICS_MQH__
 #define __ASEA_ANALYTICS_PERFORMANCEANALYTICS_MQH__

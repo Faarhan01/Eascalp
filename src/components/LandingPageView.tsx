@@ -51,91 +51,91 @@ const STRATEGIES = [
     name: 'Trend Pullback',
     regimes: 'Strong & Established Trends',
     detail:
-      'Measures real swing retracement depth into fast/medium EMA structure with momentum recovery, candle close conviction, and VWAP alignment.',
+      'Enforces HTF alignment, ADX >= 20, value-zone swing positioning, and H1 wall clearance—arming the Entry Sniper for EMA value pullbacks instead of chasing extended bars.',
   },
   {
     id: '02',
     name: 'Momentum Scalping',
     regimes: 'Trend & Vol Expansion',
     detail:
-      'Captures ADX-confirmed directional expansion only when ROC and ATR displacement align without overextension beyond 1.85x ATR.',
+      'Captures ADX-confirmed directional launches near fast EMA structure with RVOL >= 0.95, clear headroom to H1/S/R walls, and live pullback trigger optimization.',
   },
   {
     id: '03',
     name: 'Breakout Scalping',
     regimes: 'Consolidation & Early Trend',
     detail:
-      'Validates structural BOS, Donchian breaks, and retests with full candle body conviction while blocking entries straight into multi-touch S/R walls.',
+      'Validates fresh structural BOS and Donchian breaks with RVOL >= 1.10 and structural clearance while arming retest entries on overextended breakout impulses.',
   },
   {
     id: '04',
     name: 'Reversal Scalping',
     regimes: 'Exhaustion & Reversal Regimes',
     detail:
-      'Strict whitelist of authentic reversal candles paired with divergence, CHoCH, or liquidity sweeps plus runaway-ADX protection.',
+      'Requires graph discount/premium extremes (swing position, Donchian extremum, or Session VWAP Z-Score stretch) plus divergence or rejection candles.',
   },
   {
     id: '05',
     name: 'Range Scalping',
     regimes: 'Sideways & Wide Ranges',
     detail:
-      'Operates exclusively under low ADX and low efficiency ratio with weighted multi-timeframe conflict locks and positive boundary headroom.',
+      'Buys exclusively in the lower discount third and sells in the upper premium third across >= 2-touch boundaries with strict opposing-HTF locks and >= 1.55R room.',
   },
   {
     id: '06',
     name: 'Volatility Expansion',
     regimes: 'Squeeze-to-Expansion Breaks',
     detail:
-      'Triggers out of Bollinger compression on expanding ATR impulse bars with tick velocity confirmation and strict close-near-extreme checks.',
+      'Triggers out of Bollinger compression inside controlled [1.15..2.35] volatility bounds with clear H1/S/R headroom and pullback retest arming.',
   },
   {
     id: '07',
     name: 'Micro-Momentum',
-    regimes: 'High-Velocity Tick Bursts',
+    regimes: 'High-Velocity Tick Bursts (Opt-In)',
     detail:
-      'Inspects spread-cost-validated tick bursts with MACD, RSI room-to-run, and full EMA alignment across fast execution windows.',
+      'Optional burst engine (disabled by default for fee preservation) requiring >= 7 directional ticks, rising ADX, value-zone clearance, and tight <= 12% ATR spread.',
   },
   {
     id: '08',
     name: 'Liquidity Sweep',
     regimes: 'Stop-Hunt & Reversal Regimes',
     detail:
-      'Detects stop-hunt wicks beneath swing support or above swing resistance pools that snap closed inside structure with rejection momentum.',
+      'Detects >= 44% rejection wicks sweeping outer swing/PDH/PDL liquidity pools near graph extremes with empirical sweep-depth stop protection.',
   },
   {
     id: '09',
     name: 'VWAP Reversion',
     regimes: 'Ranges & Overstretched Pullbacks',
     detail:
-      'Fades statistical price extremes beyond outer Bollinger bands and Session VWAP deviation back toward institutional fair value.',
+      'Fades statistical Session VWAP Z-Score extremes (>= 1.25 sigma) aligned with discount/premium swing zones back toward fair value with >= 1.55R room.',
   },
   {
     id: '10',
     name: 'EMA Ribbon Cont.',
     regimes: 'Established & Strong Trends',
     detail:
-      'Enters high-conviction continuation thrusts when EMA 9/21/55/SMA200 fan in hierarchy after compression pauses with strong HTF alignment.',
+      'Enters EMA 9/21/55/SMA200 continuation thrusts on rising ADX with H1 wall clearance, anti-chase limits, and automatic pullback trigger refinement.',
   },
 ];
 
 const EXECUTION_PILLARS = [
   {
     icon: Sliders,
-    title: 'Structural TP Snap & 0–100 Scoring',
+    title: 'Symbol DNA, 24h Liquidity & H1 Wall Gates',
     detail:
-      'Evaluates structure, institutional PDH/PDL levels, RVOL, VWAP, and snaps TP cleanly before multi-touch S/R walls with recency-adaptive expectancy.',
+      'Classifies each instrument empirically over 240 bars (Trending, Mean-Reverting, or Breakout-Sweep), skips dead-liquidity hours automatically, and blocks trades into H1/S/R walls.',
   },
   {
     icon: ShieldCheck,
-    title: 'Vol-Adjusted Sizing & Giveback Guard',
+    title: 'Live Pullback Extremum Entry Sniper',
     detail:
-      'Scales fixed-fractional lots by score, volatility spikes, and loss streaks alongside intraday peak-profit giveback protection and transient-safe execution.',
+      'Instead of market-chasing extended bars, extended setups arm the tick-level Entry Sniper for up to 2 bars to enter on optimal EMA/retest pullbacks while guarding SL & runaway bounds.',
   },
   {
     icon: Lock,
-    title: '>=1.0R BE & Hold-Aware Trail',
+    title: 'Non-Clipping >= 1.05R BE & Wide Trail',
     detail:
-      'Partial closes arm cost-covered BE immediately while structure-swing and Chandelier trailing progressively tighten past 70% of max holding time.',
+      'Lets winners run to 3.20x ATR targets with sweep-resistant SL adaptation, delayed 1.65x ATR Break-Even (>= 1.05R), and 2.40x ATR Chandelier structure trailing.',
   },
 ];
 
@@ -170,16 +170,16 @@ export default function LandingPageView({ onOpenTerminal }: LandingPageViewProps
         <div className="mx-auto max-w-7xl px-6 py-16 lg:py-24 grid grid-cols-1 lg:grid-cols-12 gap-12 items-center">
           <div className="lg:col-span-6 space-y-6">
             <div className="border-l-2 border-sky-400 pl-3 font-mono text-xs uppercase tracking-widest text-sky-400">
-              MetaTrader 5 Native MQL5 Engine · v2.9.0
+              MetaTrader 5 Native MQL5 Engine · v3.1.0
             </div>
 
             <h1 className="font-display text-4xl sm:text-5xl font-bold tracking-tight text-slate-50 leading-[1.08]">
-              Precision Multi-Asset Scalping Without Preset Files.
+              Precision Multi-Asset Scalping Tuned to Every Chart&apos;s DNA.
             </h1>
 
             <p className="text-base sm:text-lg text-slate-300 leading-relaxed max-w-xl">
-              AdvancedScalpingEA profiles contract specs and historical market DNA across Forex, Step Index,
-              Synthetics, Metals, Indices, Equities, and Crypto—routing every bar through 10 regime-gated strategies.
+              AdvancedScalpingEA profiles contract specs, 240-bar empirical personality, and 24-hour liquidity curves
+              on any symbol—waiting at discount/premium graph extremes with a live pullback Entry Sniper.
             </p>
 
             <div className="flex flex-wrap items-center gap-4 pt-2">
@@ -239,16 +239,16 @@ export default function LandingPageView({ onOpenTerminal }: LandingPageViewProps
 
               <div className="grid grid-cols-2 sm:grid-cols-4 divide-y sm:divide-y-0 sm:divide-x divide-slate-800 border-t border-slate-800 bg-[#0F172A]">
                 <div className="px-4 py-3">
-                  <p className="font-mono text-[11px] uppercase tracking-wider text-slate-400">Default Mode</p>
-                  <p className="font-mono text-xs font-medium text-emerald-400 mt-0.5">Live &amp; Tester Ready</p>
+                  <p className="font-mono text-[11px] uppercase tracking-wider text-slate-400">Expectancy Floor</p>
+                  <p className="font-mono text-xs font-medium text-emerald-400 mt-0.5">&gt;= 1.55R / 2.6x Cost</p>
                 </div>
                 <div className="px-4 py-3">
                   <p className="font-mono text-[11px] uppercase tracking-wider text-slate-400">Risk Model</p>
                   <p className="font-mono text-xs font-medium text-slate-100 mt-0.5">Fixed-Fractional</p>
                 </div>
                 <div className="px-4 py-3">
-                  <p className="font-mono text-[11px] uppercase tracking-wider text-slate-400">BE Floor</p>
-                  <p className="font-mono text-xs font-medium text-slate-100 mt-0.5">Strict &gt;= 1.0R</p>
+                  <p className="font-mono text-[11px] uppercase tracking-wider text-slate-400">BE / Trail</p>
+                  <p className="font-mono text-xs font-medium text-slate-100 mt-0.5">1.65 / 2.40 ATR</p>
                 </div>
                 <div className="px-4 py-3">
                   <p className="font-mono text-[11px] uppercase tracking-wider text-slate-400">Telemetry</p>
@@ -271,8 +271,9 @@ export default function LandingPageView({ onOpenTerminal }: LandingPageViewProps
               Attach to Any Chart. Zero Manual Configuration Files.
             </h2>
             <p className="text-sm sm:text-base text-slate-400 leading-relaxed">
-              On initialization, the symbol profiler reads point size, tick value, broker stops levels, fill policies,
-              ATR baseline, and 24/7 synthetic behavior directly from the terminal—eliminating brittle preset maintenance.
+              On initialization, the symbol profiler inspects point size, tick value, stops levels, fill policies,
+              240-bar breakout follow-through, mean-reversion tendency, stop-hunt sweep depth, and 24-hour liquidity
+              curves directly from the terminal—eliminating manual preset maintenance.
             </p>
           </div>
 
@@ -448,7 +449,7 @@ export default function LandingPageView({ onOpenTerminal }: LandingPageViewProps
           <div className="flex items-center gap-3">
             <span className="font-display font-semibold text-slate-200">AdvancedScalpingEA</span>
             <span>·</span>
-            <span className="font-mono">MQL5 Native v2.9.0</span>
+            <span className="font-mono">MQL5 Native v3.1.0</span>
           </div>
           <div className="flex items-center gap-6">
             <button

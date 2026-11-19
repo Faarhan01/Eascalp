@@ -1,7 +1,7 @@
 //+------------------------------------------------------------------+
 //|                                                    CSVLogger.mqh |
 //|                        Advanced Multi-Market MT5 Scalping EA     |
-//|                        v2.9.0 Buffered 12-File CSV Exporter      |
+//|                        v3.0.0 Buffered 12-File CSV Exporter      |
 //+------------------------------------------------------------------+
 #ifndef __ASEA_ANALYTICS_CSVLOGGER_MQH__
 #define __ASEA_ANALYTICS_CSVLOGGER_MQH__

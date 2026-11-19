@@ -1,7 +1,7 @@
 //+------------------------------------------------------------------+
 //|                                               TradeExecution.mqh |
 //|                        Advanced Multi-Market MT5 Scalping EA     |
-//|                        v2.9.0 Multi-Symbol Reliable Execution    |
+//|                        v3.0.0 Multi-Symbol Reliable Execution    |
 //+------------------------------------------------------------------+
 #ifndef __ASEA_TRADING_TRADEEXECUTION_MQH__
 #define __ASEA_TRADING_TRADEEXECUTION_MQH__
@@ -196,7 +196,7 @@ public:
       double normTP  = symIntel.NormalizePrice(sig.takeProfit);
       double origSlDist = MathAbs(sig.entryPrice - sig.stopLoss);
       double origTpDist = MathAbs(sig.takeProfit - sig.entryPrice);
-      double targetRR   = (origSlDist > 0.0 && origTpDist > 0.0) ? MathMax(1.30, origTpDist / origSlDist) : 1.50;
+      double targetRR   = (origSlDist > 0.0 && origTpDist > 0.0) ? MathMax(1.55, origTpDist / origSlDist) : 1.75;
       double minStopDist = symIntel.GetMinStopDistancePrice();
       string comment = StringFormat("ASEA|S%d|%.0f", (int)sig.strategyId, sig.compositeScore);
       bool stopAdjustedRetried = false;

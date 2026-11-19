@@ -1,7 +1,7 @@
 //+------------------------------------------------------------------+
 //|                                           SymbolIntelligence.mqh |
 //|                        Advanced Multi-Market MT5 Scalping EA     |
-//|                        v2.9.0 Dynamic Multi-Instrument Profiler  |
+//|                        v3.1.0 Empirical Multi-Instrument DNA     |
 //+------------------------------------------------------------------+
 #ifndef __ASEA_MARKET_SYMBOLINTELLIGENCE_MQH__
 #define __ASEA_MARKET_SYMBOLINTELLIGENCE_MQH__
@@ -153,38 +153,42 @@ private:
       StringToUpper(fullU);
       string pathU = SymbolInfoString(sym, SYMBOL_PATH);
       StringToUpper(pathU);
+      string descU = SymbolInfoString(sym, SYMBOL_DESCRIPTION);
+      StringToUpper(descU);
+      string basisU = SymbolInfoString(sym, SYMBOL_BASIS);
+      StringToUpper(basisU);
+      string combinedU = fullU + " " + descU + " " + basisU + " " + pathU;
       string baseU = baseCcy;
       StringToUpper(baseU);
       string profU = profitCcy;
       StringToUpper(profU);
 
-      if(StringFind(fullU, "STEP") >= 0 || StringFind(fullU, "MULTISTEP") >= 0 || StringFind(pathU, "STEP") >= 0)
+      if(StringFind(combinedU, "STEP") >= 0 || StringFind(combinedU, "MULTISTEP") >= 0)
       {
          outStepIndex = true;
          return ASSET_SYNTHETIC;
       }
 
-      if(StringFind(fullU, "VOLATILITY") >= 0 || StringFind(fullU, "CRASH") >= 0 ||
-         StringFind(fullU, "BOOM") >= 0 || StringFind(fullU, "JUMP") >= 0 ||
-         StringFind(fullU, "RANGE BREAK") >= 0 || StringFind(fullU, "DRIFT") >= 0 ||
-         StringFind(fullU, "1HZ") >= 0 || StringFind(fullU, "DEX") >= 0 ||
-         StringFind(fullU, "HYBRID") >= 0 ||
+      if(StringFind(combinedU, "VOLATILITY") >= 0 || StringFind(combinedU, "CRASH") >= 0 ||
+         StringFind(combinedU, "BOOM") >= 0 || StringFind(combinedU, "JUMP") >= 0 ||
+         StringFind(combinedU, "RANGE BREAK") >= 0 || StringFind(combinedU, "DRIFT") >= 0 ||
+         StringFind(combinedU, "1HZ") >= 0 || StringFind(combinedU, "DEX") >= 0 ||
+         StringFind(combinedU, "HYBRID") >= 0 ||
          StringFind(fullU, "R_10") >= 0 || StringFind(fullU, "R_25") >= 0 ||
          StringFind(fullU, "R_50") >= 0 || StringFind(fullU, "R_75") >= 0 ||
          StringFind(fullU, "R_100") >= 0 || StringFind(fullU, "V10") >= 0 ||
          StringFind(fullU, "V25") >= 0 || StringFind(fullU, "V50") >= 0 ||
          StringFind(fullU, "V75") >= 0 || StringFind(fullU, "V100") >= 0 ||
-         StringFind(pathU, "SYNTH") >= 0 || StringFind(pathU, "CRASH") >= 0 ||
-         StringFind(pathU, "BOOM") >= 0 || StringFind(pathU, "VOLATILITY") >= 0)
+         StringFind(pathU, "SYNTH") >= 0)
       {
-         outSyntheticBurst = (StringFind(fullU, "CRASH") >= 0 || StringFind(fullU, "BOOM") >= 0 ||
-                              StringFind(fullU, "JUMP") >= 0 || StringFind(fullU, "VOLATILITY") >= 0 ||
-                              StringFind(fullU, "1HZ") >= 0 || StringFind(fullU, "R_") >= 0);
+         outSyntheticBurst = (StringFind(combinedU, "CRASH") >= 0 || StringFind(combinedU, "BOOM") >= 0 ||
+                              StringFind(combinedU, "JUMP") >= 0 || StringFind(combinedU, "VOLATILITY") >= 0 ||
+                              StringFind(combinedU, "1HZ") >= 0 || StringFind(fullU, "R_") >= 0);
          return ASSET_SYNTHETIC;
       }
 
-      if(StringFind(u, "XAU") >= 0 || StringFind(u, "GOLD") >= 0 ||
-         StringFind(u, "XAG") >= 0 || StringFind(u, "SILVER") >= 0 ||
+      if(StringFind(u, "XAU") >= 0 || StringFind(u, "GOLD") >= 0 || StringFind(combinedU, "GOLD") >= 0 ||
+         StringFind(u, "XAG") >= 0 || StringFind(u, "SILVER") >= 0 || StringFind(combinedU, "SILVER") >= 0 ||
          StringFind(u, "XPT") >= 0 || StringFind(u, "XPD") >= 0 ||
          StringFind(u, "XCU") >= 0 || StringFind(u, "COPPER") >= 0 ||
          StringFind(u, "XAL") >= 0 || StringFind(u, "ALUM") >= 0 ||
@@ -193,14 +197,14 @@ private:
          return ASSET_METAL;
 
       if(StringFind(u, "WTI") >= 0 || StringFind(u, "BRENT") >= 0 || StringFind(u, "BRN") >= 0 ||
-         StringFind(u, "USOIL") >= 0 || StringFind(u, "UKOIL") >= 0 ||
+         StringFind(u, "USOIL") >= 0 || StringFind(u, "UKOIL") >= 0 || StringFind(combinedU, "CRUDE") >= 0 ||
          StringFind(u, "CRUDE") >= 0 || StringFind(u, "CL_") >= 0 ||
          StringFind(u, "XTI") >= 0 || StringFind(u, "XBR") >= 0 || StringFind(u, "XNG") >= 0 ||
          StringFind(u, "NGAS") >= 0 || StringFind(u, "NATGAS") >= 0 || StringFind(u, "USO") >= 0)
          return ASSET_ENERGY;
 
-      if(StringFind(u, "BTC") >= 0 || StringFind(u, "ETH") >= 0 ||
-         StringFind(u, "SOL") >= 0 || StringFind(u, "XRP") >= 0 ||
+      if(StringFind(u, "BTC") >= 0 || StringFind(u, "ETH") >= 0 || StringFind(combinedU, "BITCOIN") >= 0 ||
+         StringFind(u, "SOL") >= 0 || StringFind(u, "XRP") >= 0 || StringFind(combinedU, "ETHEREUM") >= 0 ||
          StringFind(u, "LTC") >= 0 || StringFind(u, "ADA") >= 0 ||
          StringFind(u, "DOGE") >= 0 || StringFind(u, "BNB") >= 0 ||
          StringFind(u, "AVAX") >= 0 || StringFind(u, "DOT") >= 0 ||
@@ -234,8 +238,14 @@ private:
          StringFind(u, "SWI20") >= 0 || StringFind(u, "SMI") >= 0 || StringFind(u, "CH20") >= 0 ||
          StringFind(u, "CN50") >= 0 || StringFind(u, "NIFTY") >= 0 ||
          StringFind(u, "US2000") >= 0 || StringFind(u, "RUSSELL") >= 0 ||
-         StringFind(u, "RUT") >= 0 || StringFind(u, "VIX") >= 0 || StringFind(u, "VOLX") >= 0 || StringFind(u, "DXY") >= 0)
+         StringFind(u, "RUT") >= 0 || StringFind(u, "VIX") >= 0 || StringFind(u, "VOLX") >= 0 || StringFind(u, "DXY") >= 0 ||
+         StringFind(descU, "INDEX") >= 0 || StringFind(descU, "S&P") >= 0 || StringFind(descU, "NASDAQ") >= 0 || StringFind(descU, "DOW JONES") >= 0)
          return ASSET_INDEX;
+
+      if(StringFind(u, "AAPL") >= 0 || StringFind(u, "TSLA") >= 0 || StringFind(u, "NVDA") >= 0 ||
+         StringFind(u, "AMZN") >= 0 || StringFind(u, "MSFT") >= 0 || StringFind(u, "META") >= 0 ||
+         StringFind(u, "GOOG") >= 0 || StringFind(u, "NFLX") >= 0 || StringFind(u, "AMD") >= 0)
+         return ASSET_EQUITY;
 
       if(StringLen(u) >= 6)
       {
@@ -257,8 +267,8 @@ private:
       if(sector == SECTOR_INDEXES)         return ASSET_INDEX;
       if(sector == SECTOR_COMMODITIES)
       {
-         if(StringFind(pathU, "METAL") >= 0)  return ASSET_METAL;
-         if(StringFind(pathU, "ENERGY") >= 0 || StringFind(pathU, "OIL") >= 0 || StringFind(pathU, "GAS") >= 0) return ASSET_ENERGY;
+         if(StringFind(combinedU, "METAL") >= 0 || StringFind(combinedU, "GOLD") >= 0 || StringFind(combinedU, "SILVER") >= 0)  return ASSET_METAL;
+         if(StringFind(combinedU, "ENERGY") >= 0 || StringFind(combinedU, "OIL") >= 0 || StringFind(combinedU, "GAS") >= 0) return ASSET_ENERGY;
       }
 
       if(calcMode == SYMBOL_CALC_MODE_EXCH_STOCKS || calcMode == SYMBOL_CALC_MODE_EXCH_STOCKS_MOEX ||
@@ -569,17 +579,18 @@ public:
          m_profile.spreadToAtrBaselinePct = ((typicalSpreadPts * m_profile.point) / typicalAtr) * 100.0;
    }
 
-   void CalibrateFromHistory(const MqlRates &rates[], const int count, const double curAtr)
+   void CalibrateFromHistory(const MqlRates &rates[], const int count, const double curAtr,
+                             const ENUM_TIMEFRAMES primaryTF = PERIOD_M5)
    {
       if(!m_autoTuneFromHistory || count < 20 || curAtr <= 0.0)
          return;
 
-      int n = MathMin(48, count);
+      int n = MathMin(60, count);
       double netMove = MathAbs(rates[0].close - rates[n - 1].close);
       double sumStep = 0.0, sumWick = 0.0, sumRange = 0.0;
       int spikeBars = 0;
       double minStepDelta = 1e12;
-      double deltas[48];
+      double deltas[60];
       int dCount = 0;
 
       for(int i = 0; i < n; i++)
@@ -634,13 +645,154 @@ public:
          }
       }
 
+      // Universal Empirical DNA (v3.1.0): Learn breakout follow-through, mean-reversion rate, and stop-hunt sweep depth
+      int histLimit = MathMin(240, count);
+      int boTrials = 0, boSuccess = 0;
+      int mrTrials = 0, mrSuccess = 0;
+      double sweepDepthSum = 0.0;
+      int sweepSamples = 0;
+
+      for(int b = histLimit - 14; b >= 6; b--)
+      {
+         double priorHi = rates[b + 1].high;
+         double priorLo = rates[b + 1].low;
+         for(int k = b + 2; k <= b + 10 && k < histLimit; k++)
+         {
+            if(rates[k].high > priorHi) priorHi = rates[k].high;
+            if(rates[k].low  < priorLo) priorLo = rates[k].low;
+         }
+
+         // Forward 5 bars [b-1 .. b-5] (rates[0] is newest)
+         double fwdMaxH = rates[b - 1].high, fwdMinL = rates[b - 1].low;
+         for(int f = b - 2; f >= MathMax(0, b - 5); f--)
+         {
+            if(rates[f].high > fwdMaxH) fwdMaxH = rates[f].high;
+            if(rates[f].low  < fwdMinL) fwdMinL = rates[f].low;
+         }
+
+         // Breakout follow-through test
+         if(rates[b].close > priorHi && rates[b + 1].close <= priorHi)
+         {
+            boTrials++;
+            double mfe = (fwdMaxH - rates[b].close) / curAtr;
+            double mae = (rates[b].close - fwdMinL) / curAtr;
+            if(mfe >= 0.75 && mfe >= mae * 1.15)
+               boSuccess++;
+         }
+         else if(rates[b].close < priorLo && rates[b + 1].close >= priorLo)
+         {
+            boTrials++;
+            double mfe = (rates[b].close - fwdMinL) / curAtr;
+            double mae = (fwdMaxH - rates[b].close) / curAtr;
+            if(mfe >= 0.75 && mfe >= mae * 1.15)
+               boSuccess++;
+         }
+
+         // Rejection / Stop-hunt sweep test beyond 8-bar extremum
+         double rngB = rates[b].high - rates[b].low;
+         if(rngB > 0.0)
+         {
+            double upWick = rates[b].high - MathMax(rates[b].open, rates[b].close);
+            double loWick = MathMin(rates[b].open, rates[b].close) - rates[b].low;
+            if(rates[b].high > priorHi && rates[b].close <= priorHi && upWick >= rngB * 0.42)
+            {
+               mrTrials++;
+               sweepDepthSum += (rates[b].high - priorHi) / curAtr;
+               sweepSamples++;
+               double revMove = (rates[b].close - fwdMinL) / curAtr;
+               if(revMove >= 0.65)
+                  mrSuccess++;
+            }
+            else if(rates[b].low < priorLo && rates[b].close >= priorLo && loWick >= rngB * 0.42)
+            {
+               mrTrials++;
+               sweepDepthSum += (priorLo - rates[b].low) / curAtr;
+               sweepSamples++;
+               double revMove = (fwdMaxH - rates[b].close) / curAtr;
+               if(revMove >= 0.65)
+                  mrSuccess++;
+            }
+         }
+      }
+
+      if(boTrials >= 3)
+         m_profile.breakoutFollowRate = MathMax(0.10, MathMin(0.90, (double)boSuccess / (double)boTrials));
+      if(mrTrials >= 3)
+         m_profile.meanReversionRate = MathMax(0.10, MathMin(0.90, (double)mrSuccess / (double)mrTrials));
+      if(sweepSamples >= 2)
+         m_profile.avgSweepWickAtr = MathMax(0.10, MathMin(1.25, sweepDepthSum / (double)sweepSamples));
+
+      if(m_profile.empiricalEffRatio >= 0.30 && m_profile.breakoutFollowRate >= 0.52)
+         m_profile.symbolPersonality = PERSONALITY_TRENDING;
+      else if(m_profile.meanReversionRate >= 0.56 && m_profile.empiricalEffRatio < 0.28)
+         m_profile.symbolPersonality = PERSONALITY_MEAN_REVERTING;
+      else if(m_profile.avgSweepWickAtr >= 0.40 && m_profile.spikeBarRatio >= 0.05)
+         m_profile.symbolPersonality = PERSONALITY_BREAKOUT_SWEEP;
+      else
+         m_profile.symbolPersonality = PERSONALITY_BALANCED;
+
+      // 24-hour empirical activity profile (zero hardcoded broker timezone offsets)
+      if(PeriodSeconds(primaryTF) <= 3600)
+      {
+         double hRangeSum[24];
+         int    hCount[24];
+         ArrayInitialize(hRangeSum, 0.0);
+         ArrayInitialize(hCount, 0);
+         double totRange = 0.0;
+         int    totBars  = 0;
+
+         for(int i = 0; i < histLimit; i++)
+         {
+            double rng = rates[i].high - rates[i].low;
+            if(rng <= 0.0) continue;
+            MqlDateTime dt;
+            TimeToStruct(rates[i].time, dt);
+            if(dt.hour >= 0 && dt.hour < 24)
+            {
+               hRangeSum[dt.hour] += rng;
+               hCount[dt.hour]++;
+               totRange += rng;
+               totBars++;
+            }
+         }
+
+         if(totBars >= 30 && totRange > 0.0)
+         {
+            double overallMean = totRange / (double)totBars;
+            int activeHrs = 0;
+            for(int h = 0; h < 24; h++)
+            {
+               m_profile.hourlySampleCount[h] = hCount[h];
+               if(hCount[h] >= 2 && overallMean > 0.0)
+               {
+                  m_profile.hourlyActivityRatio[h] = MathMax(0.15, MathMin(3.0, (hRangeSum[h] / (double)hCount[h]) / overallMean));
+                  if(hCount[h] >= 3) activeHrs++;
+               }
+               else
+                  m_profile.hourlyActivityRatio[h] = 1.0;
+            }
+            m_profile.activeHoursCount = activeHrs;
+            m_profile.hourlyProfileReady = (activeHrs >= 8);
+         }
+      }
+
       m_profile.empiricalProfileReady = true;
-      m_profile.microstructureSummary = StringFormat("ER=%.2f Wick=%.0f%% Spk=%.0f%% SprATR=%.1f%% Step=%s",
+      m_profile.microstructureSummary = StringFormat("DNA=%s ER=%.2f BO=%.0f%% MR=%.0f%% Swp=%.2f",
+                                                     SymbolPersonalityToString(m_profile.symbolPersonality),
                                                      m_profile.empiricalEffRatio,
-                                                     m_profile.avgWickRatio * 100.0,
-                                                     m_profile.spikeBarRatio * 100.0,
-                                                     m_profile.spreadToAtrBaselinePct,
-                                                     m_profile.empiricalQuantizedStep ? "Quantized" : "Continuous");
+                                                     m_profile.breakoutFollowRate * 100.0,
+                                                     m_profile.meanReversionRate * 100.0,
+                                                     m_profile.avgSweepWickAtr);
+   }
+
+   bool IsQuietDeadHour(const int serverHour) const
+   {
+      if(m_profile.isSynthetic24x7 || !m_profile.hourlyProfileReady)
+         return false;
+      if(serverHour < 0 || serverHour >= 24)
+         return false;
+      return (m_profile.hourlySampleCount[serverHour] >= 3 &&
+              m_profile.hourlyActivityRatio[serverHour] < 0.48);
    }
 
    void RecordMeasuredSlippage(const double slippagePts)
@@ -671,16 +823,17 @@ public:
       return baseFloor;
    }
 
-   SSymbolProfile   GetProfile() const               { return m_profile; }
-   double           GetPoint() const                 { return m_profile.point; }
-   double           GetTickSize() const              { return m_profile.tickSize; }
-   double           GetPipSize() const               { return m_profile.pipSize; }
-   bool             HasRealVolume() const            { return m_profile.hasRealVolume; }
-   bool             IsStepIndex() const              { return m_profile.isStepIndex; }
-   bool             IsSynthetic24x7() const          { return m_profile.isSynthetic24x7; }
-   bool             IsSessionOpenNow() const         { return m_profile.sessionOpenNow; }
-   bool             IsEmpiricalProfileReady() const  { return m_profile.empiricalProfileReady; }
-   ENUM_ASSET_CLASS GetAssetClass() const            { return m_profile.assetClass; }
+   SSymbolProfile          GetProfile() const               { return m_profile; }
+   double                  GetPoint() const                 { return m_profile.point; }
+   double                  GetTickSize() const              { return m_profile.tickSize; }
+   double                  GetPipSize() const               { return m_profile.pipSize; }
+   bool                    HasRealVolume() const            { return m_profile.hasRealVolume; }
+   bool                    IsStepIndex() const              { return m_profile.isStepIndex; }
+   bool                    IsSynthetic24x7() const          { return m_profile.isSynthetic24x7; }
+   bool                    IsSessionOpenNow() const         { return m_profile.sessionOpenNow; }
+   bool                    IsEmpiricalProfileReady() const  { return m_profile.empiricalProfileReady; }
+   ENUM_ASSET_CLASS        GetAssetClass() const            { return m_profile.assetClass; }
+   ENUM_SYMBOL_PERSONALITY GetPersonality() const           { return m_profile.symbolPersonality; }
 
    SAdaptiveAssetProfile GetAdaptiveAssetProfile() const
    {
@@ -691,28 +844,28 @@ public:
       if(m_profile.isStepIndex)
       {
          ap.profileName         = "Step Index (Quantized Synthetic)";
-         ap.slAtrMult           = 1.80;
-         ap.tpAtrMult           = 3.00;
-         ap.beTriggerAtr        = 1.50;
-         ap.partialTriggerAtr   = 2.00;
-         ap.partialFraction     = 0.40;
-         ap.trailStartAtr       = 2.00;
-         ap.trailStepAtr        = 1.05;
+         ap.slAtrMult           = 1.85;
+         ap.tpAtrMult           = 3.50;
+         ap.beTriggerAtr        = 1.75;
+         ap.partialTriggerAtr   = 2.75;
+         ap.partialFraction     = 0.30;
+         ap.trailStartAtr       = 2.55;
+         ap.trailStepAtr        = 1.30;
          ap.adxStrongThresh     = 25.0;
-         ap.adxWeakThresh       = 16.0;
+         ap.adxWeakThresh       = 17.5;
          ap.volHighRatio        = 1.55;
          ap.volLowRatio         = 0.65;
-         ap.spreadUnstableRatio = 3.00;
-         ap.maxSpreadRatio      = 2.80;
-         ap.maxSpreadAtrPct     = 30.0;
-         ap.maxVolatilityRatio  = 4.00;
-         ap.minVolatilityRatio  = 0.25;
-         ap.minTpToCostRatio    = 2.20;
-         ap.minSignalScore      = 58.0;
-         ap.lossCooldownBars    = 2;
+         ap.spreadUnstableRatio = 2.80;
+         ap.maxSpreadRatio      = 2.40;
+         ap.maxSpreadAtrPct     = 22.0;
+         ap.maxVolatilityRatio  = 3.40;
+         ap.minVolatilityRatio  = 0.35;
+         ap.minTpToCostRatio    = 2.60;
+         ap.minSignalScore      = 63.0;
+         ap.lossCooldownBars    = 3;
          ap.recommendedSlippagePts = MathMax(30, m_profile.recommendedSlippagePts);
          ap.allow24x7Continuous = true;
-         ap.tuningNotes         = "24/7 continuous quantized-step profile with wider swing stop room and trend trail";
+         ap.tuningNotes         = "24/7 quantized-step profile with positive-expectancy runner geometry";
          return ap;
       }
 
@@ -720,62 +873,70 @@ public:
       {
          case ASSET_FOREX_MAJOR:
             ap.profileName         = "Forex Major";
-            ap.slAtrMult           = 1.55;
-            ap.tpAtrMult           = 2.75;
-            ap.beTriggerAtr        = 1.40;
-            ap.partialTriggerAtr   = 1.85;
-            ap.partialFraction     = 0.40;
-            ap.trailStartAtr       = 1.95;
-            ap.trailStepAtr        = 0.95;
+            ap.slAtrMult           = 1.60;
+            ap.tpAtrMult           = 3.15;
+            ap.beTriggerAtr        = 1.60;
+            ap.partialTriggerAtr   = 2.55;
+            ap.partialFraction     = 0.30;
+            ap.trailStartAtr       = 2.35;
+            ap.trailStepAtr        = 1.20;
             ap.adxStrongThresh     = 26.0;
-            ap.adxWeakThresh       = 17.0;
-            ap.maxSpreadAtrPct     = 24.0;
-            ap.minSignalScore      = 60.0;
-            ap.lossCooldownBars    = 3;
+            ap.adxWeakThresh       = 18.0;
+            ap.maxSpreadRatio      = 2.15;
+            ap.maxSpreadAtrPct     = 18.0;
+            ap.maxVolatilityRatio  = 2.75;
+            ap.minVolatilityRatio  = 0.42;
+            ap.minTpToCostRatio    = 2.60;
+            ap.minSignalScore      = 64.0;
+            ap.lossCooldownBars    = 4;
             ap.recommendedSlippagePts = MathMax(20, m_profile.recommendedSlippagePts);
             ap.allow24x7Continuous = false;
-            ap.tuningNotes         = "Tight spread-cost FX major scaling";
+            ap.tuningNotes         = "Positive-expectancy FX major payoff & low spread friction";
             break;
 
          case ASSET_FOREX_MINOR:
             ap.profileName         = "Forex Minor / Cross";
             ap.slAtrMult           = 1.70;
-            ap.tpAtrMult           = 2.95;
-            ap.beTriggerAtr        = 1.50;
-            ap.partialTriggerAtr   = 1.95;
-            ap.partialFraction     = 0.40;
-            ap.trailStartAtr       = 2.05;
-            ap.trailStepAtr        = 1.00;
+            ap.tpAtrMult           = 3.30;
+            ap.beTriggerAtr        = 1.70;
+            ap.partialTriggerAtr   = 2.65;
+            ap.partialFraction     = 0.30;
+            ap.trailStartAtr       = 2.45;
+            ap.trailStepAtr        = 1.25;
             ap.adxStrongThresh     = 26.0;
-            ap.adxWeakThresh       = 17.0;
-            ap.spreadUnstableRatio = 3.00;
-            ap.maxSpreadRatio      = 2.75;
-            ap.maxSpreadAtrPct     = 28.0;
-            ap.minSignalScore      = 60.0;
-            ap.lossCooldownBars    = 3;
+            ap.adxWeakThresh       = 18.0;
+            ap.spreadUnstableRatio = 2.75;
+            ap.maxSpreadRatio      = 2.35;
+            ap.maxSpreadAtrPct     = 20.0;
+            ap.maxVolatilityRatio  = 2.85;
+            ap.minVolatilityRatio  = 0.42;
+            ap.minTpToCostRatio    = 2.65;
+            ap.minSignalScore      = 65.0;
+            ap.lossCooldownBars    = 4;
             ap.recommendedSlippagePts = MathMax(30, m_profile.recommendedSlippagePts);
             ap.allow24x7Continuous = false;
-            ap.tuningNotes         = "Wider wick clearance for JPY/EUR/GBP cross volatility";
+            ap.tuningNotes         = "Wider wick room + full runner targets for cross volatility";
             break;
 
          case ASSET_FOREX_EXOTIC:
             ap.profileName         = "Forex Exotic";
             ap.slAtrMult           = 1.90;
-            ap.tpAtrMult           = 3.25;
-            ap.beTriggerAtr        = 1.60;
-            ap.partialTriggerAtr   = 2.10;
-            ap.partialFraction     = 0.45;
-            ap.trailStartAtr       = 2.20;
-            ap.trailStepAtr        = 1.10;
+            ap.tpAtrMult           = 3.65;
+            ap.beTriggerAtr        = 1.85;
+            ap.partialTriggerAtr   = 2.90;
+            ap.partialFraction     = 0.35;
+            ap.trailStartAtr       = 2.65;
+            ap.trailStepAtr        = 1.35;
             ap.adxStrongThresh     = 28.0;
-            ap.adxWeakThresh       = 18.0;
-            ap.spreadUnstableRatio = 3.20;
-            ap.maxSpreadRatio      = 2.85;
-            ap.maxSpreadAtrPct     = 34.0;
-            ap.maxVolatilityRatio  = 3.80;
-            ap.minTpToCostRatio    = 2.40;
-            ap.minSignalScore      = 63.0;
-            ap.lossCooldownBars    = 3;
+            ap.adxWeakThresh       = 19.0;
+            ap.spreadUnstableRatio = 2.90;
+            ap.maxSpreadRatio      = 2.45;
+            ap.maxSpreadAtrPct     = 24.0;
+            ap.maxVolatilityRatio  = 3.10;
+            ap.minVolatilityRatio  = 0.45;
+            ap.minTpToCostRatio    = 2.85;
+            ap.minSignalScore      = 67.0;
+            ap.lossCooldownBars    = 4;
             ap.recommendedSlippagePts = MathMax(45, m_profile.recommendedSlippagePts);
             ap.allow24x7Continuous = false;
             ap.tuningNotes         = "Strict cost-recovery threshold and wide stop clearance for exotics";
@@ -784,125 +945,139 @@ public:
          case ASSET_METAL:
             ap.profileName         = "Metals (XAU/XAG)";
             ap.slAtrMult           = 1.75;
-            ap.tpAtrMult           = 3.10;
-            ap.beTriggerAtr        = 1.50;
-            ap.partialTriggerAtr   = 2.00;
-            ap.partialFraction     = 0.40;
-            ap.trailStartAtr       = 2.10;
-            ap.trailStepAtr        = 1.05;
+            ap.tpAtrMult           = 3.45;
+            ap.beTriggerAtr        = 1.70;
+            ap.partialTriggerAtr   = 2.75;
+            ap.partialFraction     = 0.30;
+            ap.trailStartAtr       = 2.50;
+            ap.trailStepAtr        = 1.30;
             ap.adxStrongThresh     = 27.0;
-            ap.adxWeakThresh       = 17.5;
-            ap.maxSpreadAtrPct     = 26.0;
-            ap.maxVolatilityRatio  = 3.60;
-            ap.minSignalScore      = 61.0;
-            ap.lossCooldownBars    = 3;
+            ap.adxWeakThresh       = 18.5;
+            ap.maxSpreadRatio      = 2.25;
+            ap.maxSpreadAtrPct     = 20.0;
+            ap.maxVolatilityRatio  = 3.00;
+            ap.minVolatilityRatio  = 0.42;
+            ap.minTpToCostRatio    = 2.70;
+            ap.minSignalScore      = 65.0;
+            ap.lossCooldownBars    = 4;
             ap.recommendedSlippagePts = MathMax(35, m_profile.recommendedSlippagePts);
             ap.allow24x7Continuous = false;
-            ap.tuningNotes         = "Sweep-resistant SL + extended Chandelier runner for Gold/Silver";
+            ap.tuningNotes         = "Sweep-resistant SL + extended runner target for Gold/Silver";
             break;
 
          case ASSET_INDEX:
          case ASSET_ENERGY:
             ap.profileName         = (m_profile.assetClass == ASSET_INDEX) ? "Stock Index CFD" : "Energy CFD";
             ap.slAtrMult           = 1.75;
-            ap.tpAtrMult           = 3.05;
-            ap.beTriggerAtr        = 1.50;
-            ap.partialTriggerAtr   = 2.00;
-            ap.partialFraction     = 0.40;
-            ap.trailStartAtr       = 2.05;
-            ap.trailStepAtr        = 1.05;
+            ap.tpAtrMult           = 3.40;
+            ap.beTriggerAtr        = 1.70;
+            ap.partialTriggerAtr   = 2.70;
+            ap.partialFraction     = 0.30;
+            ap.trailStartAtr       = 2.45;
+            ap.trailStepAtr        = 1.30;
             ap.adxStrongThresh     = 26.0;
-            ap.adxWeakThresh       = 17.0;
-            ap.maxSpreadAtrPct     = 28.0;
-            ap.maxVolatilityRatio  = 3.60;
-            ap.minSignalScore      = 60.0;
-            ap.lossCooldownBars    = 3;
+            ap.adxWeakThresh       = 18.0;
+            ap.maxSpreadRatio      = 2.25;
+            ap.maxSpreadAtrPct     = 20.0;
+            ap.maxVolatilityRatio  = 3.00;
+            ap.minVolatilityRatio  = 0.42;
+            ap.minTpToCostRatio    = 2.65;
+            ap.minSignalScore      = 64.0;
+            ap.lossCooldownBars    = 4;
             ap.recommendedSlippagePts = MathMax(40, m_profile.recommendedSlippagePts);
             ap.allow24x7Continuous = false;
-            ap.tuningNotes         = "Momentum-friendly index/energy continuation target sizing";
+            ap.tuningNotes         = "High-expectancy index/energy continuation sizing";
             break;
 
          case ASSET_SYNTHETIC:
             ap.profileName         = "Synthetic Volatility / Crash-Boom";
             ap.slAtrMult           = 1.90;
-            ap.tpAtrMult           = 3.25;
-            ap.beTriggerAtr        = 1.55;
-            ap.partialTriggerAtr   = 2.05;
-            ap.partialFraction     = 0.40;
-            ap.trailStartAtr       = 2.15;
-            ap.trailStepAtr        = 1.10;
+            ap.tpAtrMult           = 3.60;
+            ap.beTriggerAtr        = 1.80;
+            ap.partialTriggerAtr   = 2.85;
+            ap.partialFraction     = 0.30;
+            ap.trailStartAtr       = 2.60;
+            ap.trailStepAtr        = 1.35;
             ap.adxStrongThresh     = 25.0;
-            ap.adxWeakThresh       = 16.5;
+            ap.adxWeakThresh       = 18.0;
             ap.volHighRatio        = 1.55;
             ap.volLowRatio         = 0.65;
-            ap.spreadUnstableRatio = 3.10;
-            ap.maxSpreadRatio      = 2.90;
-            ap.maxSpreadAtrPct     = 30.0;
-            ap.maxVolatilityRatio  = 4.20;
-            ap.minVolatilityRatio  = 0.25;
-            ap.minTpToCostRatio    = 2.20;
-            ap.minSignalScore      = 59.0;
-            ap.lossCooldownBars    = 2;
+            ap.spreadUnstableRatio = 2.80;
+            ap.maxSpreadRatio      = 2.45;
+            ap.maxSpreadAtrPct     = 22.0;
+            ap.maxVolatilityRatio  = 3.40;
+            ap.minVolatilityRatio  = 0.35;
+            ap.minTpToCostRatio    = 2.65;
+            ap.minSignalScore      = 64.0;
+            ap.lossCooldownBars    = 3;
             ap.recommendedSlippagePts = MathMax(40, m_profile.recommendedSlippagePts);
             ap.allow24x7Continuous = true;
-            ap.tuningNotes         = "24/7 synthetic expansion & spike-tolerant ATR regime scaling";
+            ap.tuningNotes         = "24/7 synthetic spike-tolerant SL & runner targets";
             break;
 
          case ASSET_CRYPTO:
             ap.profileName         = "Crypto CFD (24/7)";
             ap.slAtrMult           = 1.95;
-            ap.tpAtrMult           = 3.40;
-            ap.beTriggerAtr        = 1.60;
-            ap.partialTriggerAtr   = 2.10;
-            ap.partialFraction     = 0.40;
-            ap.trailStartAtr       = 2.20;
-            ap.trailStepAtr        = 1.15;
+            ap.tpAtrMult           = 3.70;
+            ap.beTriggerAtr        = 1.85;
+            ap.partialTriggerAtr   = 2.90;
+            ap.partialFraction     = 0.30;
+            ap.trailStartAtr       = 2.65;
+            ap.trailStepAtr        = 1.40;
             ap.adxStrongThresh     = 26.0;
-            ap.adxWeakThresh       = 17.0;
+            ap.adxWeakThresh       = 18.5;
             ap.volHighRatio        = 1.55;
-            ap.spreadUnstableRatio = 3.20;
-            ap.maxSpreadRatio      = 3.00;
-            ap.maxSpreadAtrPct     = 34.0;
-            ap.maxVolatilityRatio  = 4.20;
-            ap.minTpToCostRatio    = 2.40;
-            ap.minSignalScore      = 61.0;
-            ap.lossCooldownBars    = 3;
+            ap.spreadUnstableRatio = 2.90;
+            ap.maxSpreadRatio      = 2.50;
+            ap.maxSpreadAtrPct     = 24.0;
+            ap.maxVolatilityRatio  = 3.40;
+            ap.minVolatilityRatio  = 0.40;
+            ap.minTpToCostRatio    = 2.75;
+            ap.minSignalScore      = 66.0;
+            ap.lossCooldownBars    = 4;
             ap.recommendedSlippagePts = MathMax(60, m_profile.recommendedSlippagePts);
             ap.allow24x7Continuous = true;
-            ap.tuningNotes         = "24/7 crypto volatility & spread-cushion scaling";
+            ap.tuningNotes         = "24/7 crypto spread-cushion & high-R:R targeting";
             break;
 
          case ASSET_EQUITY:
             ap.profileName         = "Equity / Stock CFD";
             ap.slAtrMult           = 1.80;
-            ap.tpAtrMult           = 3.10;
-            ap.beTriggerAtr        = 1.50;
-            ap.partialTriggerAtr   = 2.00;
-            ap.partialFraction     = 0.40;
-            ap.trailStartAtr       = 2.10;
-            ap.trailStepAtr        = 1.05;
+            ap.tpAtrMult           = 3.45;
+            ap.beTriggerAtr        = 1.75;
+            ap.partialTriggerAtr   = 2.75;
+            ap.partialFraction     = 0.30;
+            ap.trailStartAtr       = 2.50;
+            ap.trailStepAtr        = 1.30;
             ap.adxStrongThresh     = 26.0;
-            ap.adxWeakThresh       = 17.0;
-            ap.maxSpreadAtrPct     = 30.0;
-            ap.maxVolatilityRatio  = 3.60;
-            ap.minSignalScore      = 61.0;
-            ap.lossCooldownBars    = 3;
+            ap.adxWeakThresh       = 18.5;
+            ap.maxSpreadRatio      = 2.25;
+            ap.maxSpreadAtrPct     = 22.0;
+            ap.maxVolatilityRatio  = 3.00;
+            ap.minVolatilityRatio  = 0.42;
+            ap.minTpToCostRatio    = 2.65;
+            ap.minSignalScore      = 65.0;
+            ap.lossCooldownBars    = 4;
             ap.recommendedSlippagePts = MathMax(35, m_profile.recommendedSlippagePts);
             ap.allow24x7Continuous = false;
-            ap.tuningNotes         = "Gap & wick-safe Equity CFD scaling";
+            ap.tuningNotes         = "Gap & wick-safe Equity CFD positive-expectancy scaling";
             break;
 
          default:
             ap.profileName         = "Broker CFD (Generic Auto)";
             ap.slAtrMult           = 1.75;
-            ap.tpAtrMult           = 3.00;
-            ap.beTriggerAtr        = 1.50;
-            ap.partialTriggerAtr   = 1.95;
-            ap.partialFraction     = 0.40;
-            ap.trailStartAtr       = 2.05;
-            ap.trailStepAtr        = 1.05;
-            ap.maxSpreadAtrPct     = 30.0;
-            ap.minSignalScore      = 60.0;
+            ap.tpAtrMult           = 3.35;
+            ap.beTriggerAtr        = 1.70;
+            ap.partialTriggerAtr   = 2.65;
+            ap.partialFraction     = 0.30;
+            ap.trailStartAtr       = 2.45;
+            ap.trailStepAtr        = 1.25;
+            ap.maxSpreadRatio      = 2.25;
+            ap.maxSpreadAtrPct     = 22.0;
+            ap.maxVolatilityRatio  = 3.00;
+            ap.minVolatilityRatio  = 0.42;
+            ap.minTpToCostRatio    = 2.65;
+            ap.minSignalScore      = 64.0;
             ap.recommendedSlippagePts = MathMax(35, m_profile.recommendedSlippagePts);
             ap.allow24x7Continuous = m_profile.isSynthetic24x7;
             ap.tuningNotes         = "Dynamic tick/contract-normalized CFD baseline";
@@ -912,29 +1087,54 @@ public:
       // Apply Empirical Market-DNA micro-adjustments learned from symbol history
       if(m_autoTuneFromHistory && m_profile.empiricalProfileReady)
       {
-         // High-wick instruments receive slightly wider SL & trail cushion so liquidity wicks don't hunt stops
          if(m_profile.avgWickRatio > 0.56)
          {
-            ap.slAtrMult    += 0.15;
+            ap.slAtrMult    += 0.10;
+            ap.tpAtrMult    += 0.20;
             ap.trailStepAtr += 0.10;
          }
-         // Spiky outlier instruments (Boom/Crash bursts, high-beta open spikes) get extra SL clearance & score discipline
+         if(m_profile.avgSweepWickAtr >= 0.40)
+         {
+            // Clear typical empirical stop-hunt overshoot on this symbol
+            ap.slAtrMult += MathMin(0.30, (m_profile.avgSweepWickAtr - 0.30) * 0.50);
+         }
          if(m_profile.spikeBarRatio >= 0.08)
          {
-            ap.slAtrMult     += 0.15;
+            ap.slAtrMult     += 0.10;
+            ap.tpAtrMult     += 0.25;
             ap.trailStepAtr  += 0.10;
-            ap.minSignalScore = MathMin(72.0, ap.minSignalScore + 2.0);
+            ap.minSignalScore = MathMin(74.0, ap.minSignalScore + 2.0);
          }
-         // Smooth trending symbols earn extended take-profit targets
          if(m_profile.empiricalEffRatio >= 0.36)
          {
-            ap.tpAtrMult += 0.25;
+            ap.tpAtrMult += 0.30;
          }
-         // High friction (spread consumes large slice of ATR) requires stronger score & higher R:R target
-         if(m_profile.spreadToAtrBaselinePct >= 14.0)
+         if(m_profile.symbolPersonality == PERSONALITY_TRENDING)
          {
-            ap.minSignalScore = MathMin(72.0, ap.minSignalScore + 3.0);
+            ap.tpAtrMult     += 0.35;
+            ap.trendAffinity  = 1.25;
+            ap.meanRevAffinity = 0.85;
+            ap.sweepAffinity  = 0.95;
+         }
+         else if(m_profile.symbolPersonality == PERSONALITY_MEAN_REVERTING)
+         {
+            ap.tpAtrMult     = MathMax(2.75, ap.tpAtrMult - 0.20);
+            ap.trendAffinity  = 0.85;
+            ap.meanRevAffinity = 1.28;
+            ap.sweepAffinity  = 1.20;
+         }
+         else if(m_profile.symbolPersonality == PERSONALITY_BREAKOUT_SWEEP)
+         {
+            ap.slAtrMult     += 0.12;
             ap.tpAtrMult     += 0.25;
+            ap.trendAffinity  = 0.95;
+            ap.meanRevAffinity = 1.15;
+            ap.sweepAffinity  = 1.32;
+         }
+         if(m_profile.spreadToAtrBaselinePct >= 12.0)
+         {
+            ap.minSignalScore = MathMin(74.0, ap.minSignalScore + 3.0);
+            ap.tpAtrMult     += 0.30;
             ap.beTriggerAtr  += 0.10;
          }
       }

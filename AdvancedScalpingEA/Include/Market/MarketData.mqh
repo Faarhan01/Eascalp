@@ -1,7 +1,7 @@
 //+------------------------------------------------------------------+
 //|                                                   MarketData.mqh |
 //|                        Advanced Multi-Market MT5 Scalping EA     |
-//|                        v2.9.0 Cached Multi-Timeframe Data Engine |
+//|                        v3.0.0 Cached Multi-Timeframe Data Engine |
 //+------------------------------------------------------------------+
 #ifndef __ASEA_MARKET_MARKETDATA_MQH__
 #define __ASEA_MARKET_MARKETDATA_MQH__

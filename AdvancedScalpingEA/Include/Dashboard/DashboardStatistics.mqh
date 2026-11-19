@@ -1,7 +1,7 @@
 //+------------------------------------------------------------------+
 //|                                          DashboardStatistics.mqh |
 //|                        Advanced Multi-Market MT5 Scalping EA     |
-//|                        v2.9.0 Metric Formatting Helpers         |
+//|                        v3.0.0 Metric Formatting Helpers         |
 //+------------------------------------------------------------------+
 #ifndef __ASEA_DASHBOARD_DASHBOARDSTATISTICS_MQH__
 #define __ASEA_DASHBOARD_DASHBOARDSTATISTICS_MQH__

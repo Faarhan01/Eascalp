@@ -1,7 +1,7 @@
 //+------------------------------------------------------------------+
 //|                                       CandlestickRecognition.mqh |
 //|                        Advanced Multi-Market MT5 Scalping EA     |
-//|                        v2.9.0 Context-Aware Price Action Engine  |
+//|                        v3.1.0 Context-Aware Price Action Engine  |
 //+------------------------------------------------------------------+
 #ifndef __ASEA_INDICATORS_CANDLESTICKRECOGNITION_MQH__
 #define __ASEA_INDICATORS_CANDLESTICKRECOGNITION_MQH__
@@ -107,14 +107,14 @@ public:
       {
          m_signal.pattern = CANDLE_BEAR_ENGULFING; m_signal.bias = SIGNAL_SELL; m_signal.strength = 0.86; m_signal.name = "Bearish Engulfing";
       }
-      else if(lower0 >= MathMax(body0, effAtr * 0.15) * m_pinWickMinRatio && upper0 <= range0 * 0.22)
+      else if(m_signal.relSizeAtr >= 0.45 && lower0 >= MathMax(body0, effAtr * 0.15) * m_pinWickMinRatio && upper0 <= range0 * 0.22)
       {
          bool atLow = (l0 <= MathMin(l1, r[2].low));
          m_signal.pattern = atLow ? CANDLE_HAMMER : CANDLE_BULL_PINBAR;
          m_signal.bias = SIGNAL_BUY; m_signal.strength = atLow ? 0.84 : 0.72;
          m_signal.name = atLow ? "Hammer Rejection" : "Bullish Pin Bar";
       }
-      else if(upper0 >= MathMax(body0, effAtr * 0.15) * m_pinWickMinRatio && lower0 <= range0 * 0.22)
+      else if(m_signal.relSizeAtr >= 0.45 && upper0 >= MathMax(body0, effAtr * 0.15) * m_pinWickMinRatio && lower0 <= range0 * 0.22)
       {
          bool atHigh = (h0 >= MathMax(h1, r[2].high));
          m_signal.pattern = atHigh ? CANDLE_SHOOTING_STAR : CANDLE_BEAR_PINBAR;
@@ -159,21 +159,29 @@ public:
       if(m_signal.pattern != CANDLE_NONE && structure.isReady)
       {
          double tol = effAtr * 0.65;
+         bool isRevCandle = (m_signal.pattern == CANDLE_HAMMER || m_signal.pattern == CANDLE_SHOOTING_STAR ||
+                             m_signal.pattern == CANDLE_MORNING_STAR || m_signal.pattern == CANDLE_EVENING_STAR ||
+                             m_signal.pattern == CANDLE_BULL_ENGULFING || m_signal.pattern == CANDLE_BEAR_ENGULFING ||
+                             m_signal.pattern == CANDLE_BULL_PINBAR || m_signal.pattern == CANDLE_BEAR_PINBAR);
          if(m_signal.bias == SIGNAL_BUY)
          {
-            bool atZone = (MathAbs(l0 - structure.nearestSupport) <= tol) ||
-                          (MathAbs(l0 - ind.emaMedium) <= tol) ||
-                          (l0 <= ind.bbLower + tol * 0.35);
-            m_signal.contextValidated = (atZone && ind.rsi < 70.0 && structure.structureBias >= 0);
-            m_signal.contextNote = atZone ? "Anchored at support/EMA21/BB" : "Mid-range candle";
+            bool atBoundary = (structure.nearestSupport > 0.0 && MathAbs(l0 - structure.nearestSupport) <= tol) ||
+                              (l0 <= ind.bbLower + tol * 0.35);
+            bool inDiscount = structure.isDiscountZone || (structure.swingRangePos01 <= 0.45);
+            bool atZone = atBoundary || (MathAbs(l0 - ind.emaMedium) <= tol);
+            bool revOk = (isRevCandle && (atBoundary || structure.isDiscountZone) && ind.rsi <= 44.0);
+            m_signal.contextValidated = revOk || (atZone && inDiscount && ind.rsi < 66.0 && structure.structureBias >= 0);
+            m_signal.contextNote = atBoundary ? "Anchored at support/BB extreme" : (inDiscount ? "Anchored in discount zone" : "Mid/upper range candle");
          }
          else if(m_signal.bias == SIGNAL_SELL)
          {
-            bool atZone = (MathAbs(h0 - structure.nearestResistance) <= tol) ||
-                          (MathAbs(h0 - ind.emaMedium) <= tol) ||
-                          (h0 >= ind.bbUpper - tol * 0.35);
-            m_signal.contextValidated = (atZone && ind.rsi > 30.0 && structure.structureBias <= 0);
-            m_signal.contextNote = atZone ? "Anchored at resistance/EMA21/BB" : "Mid-range candle";
+            bool atBoundary = (structure.nearestResistance > 0.0 && MathAbs(h0 - structure.nearestResistance) <= tol) ||
+                              (h0 >= ind.bbUpper - tol * 0.35);
+            bool inPremium = structure.isPremiumZone || (structure.swingRangePos01 >= 0.55);
+            bool atZone = atBoundary || (MathAbs(h0 - ind.emaMedium) <= tol);
+            bool revOk = (isRevCandle && (atBoundary || structure.isPremiumZone) && ind.rsi >= 56.0);
+            m_signal.contextValidated = revOk || (atZone && inPremium && ind.rsi > 34.0 && structure.structureBias <= 0);
+            m_signal.contextNote = atBoundary ? "Anchored at resistance/BB extreme" : (inPremium ? "Anchored in premium zone" : "Mid/lower range candle");
          }
          else
          {

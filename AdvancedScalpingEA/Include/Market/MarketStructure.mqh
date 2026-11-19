@@ -1,7 +1,7 @@
 //+------------------------------------------------------------------+
 //|                                              MarketStructure.mqh |
 //|                        Advanced Multi-Market MT5 Scalping EA     |
-//|                        v2.9.0 Confirmed vs Developing Structure  |
+//|                        v3.1.0 Confirmed Structure & Value Zones  |
 //+------------------------------------------------------------------+
 #ifndef __ASEA_MARKET_MARKETSTRUCTURE_MQH__
 #define __ASEA_MARKET_MARKETSTRUCTURE_MQH__
@@ -112,10 +112,12 @@ public:
 
       double swingHighs[12];
       datetime swingHighTimes[12];
-      int shCount = 0;
+      int    swingHighBars[12];
+      int    shCount = 0;
       double swingLows[12];
       datetime swingLowTimes[12];
-      int slCount = 0;
+      int    swingLowBars[12];
+      int    slCount = 0;
 
       // Estimate ATR when caller passes 0 so swing prominence still filters micro-noise
       double estAtr = atr;
@@ -142,6 +144,7 @@ public:
             {
                swingHighs[shCount] = rates[i].high;
                swingHighTimes[shCount] = rates[i].time;
+               swingHighBars[shCount] = i;
                shCount++;
             }
          }
@@ -156,6 +159,7 @@ public:
             {
                swingLows[slCount] = rates[i].low;
                swingLowTimes[slCount] = rates[i].time;
+               swingLowBars[slCount] = i;
                slCount++;
             }
          }
@@ -173,12 +177,14 @@ public:
             {
                swingHighs[shCount] = rates[i].high;
                swingHighTimes[shCount] = rates[i].time;
+               swingHighBars[shCount] = i;
                shCount++;
             }
             if(slCount < 12 && IsSwingLow(rates, i, total, m_swingStrength))
             {
                swingLows[slCount] = rates[i].low;
                swingLowTimes[slCount] = rates[i].time;
+               swingLowBars[slCount] = i;
                slCount++;
             }
             if(shCount >= 12 && slCount >= 12) break;
@@ -195,9 +201,11 @@ public:
       m_state.lastSwingHigh     = swingHighs[0];
       m_state.prevSwingHigh     = swingHighs[1];
       m_state.lastSwingHighTime = swingHighTimes[0];
+      m_state.barsSinceSwingHigh = swingHighBars[0];
       m_state.lastSwingLow      = swingLows[0];
       m_state.prevSwingLow      = swingLows[1];
       m_state.lastSwingLowTime  = swingLowTimes[0];
+      m_state.barsSinceSwingLow = swingLowBars[0];
 
       // Developing (unconfirmed) extrema in most recent swingStrength bars
       double devH = rates[0].high, devL = rates[0].low;
@@ -240,6 +248,27 @@ public:
          }
       }
 
+      // Refresh higher-timeframe H1 swing wall (48 completed H1 bars) once per H1 bar
+      datetime curH1Time = iTime(sym, PERIOD_H1, 0);
+      if(curH1Time > 0 && curH1Time != m_state.htfSwingBarTime)
+      {
+         MqlRates h1Rates[];
+         ArraySetAsSeries(h1Rates, true);
+         int h1Count = CopyRates(sym, PERIOD_H1, 1, 48, h1Rates);
+         if(h1Count >= 12)
+         {
+            double hh1 = h1Rates[0].high, ll1 = h1Rates[0].low;
+            for(int k = 1; k < h1Count; k++)
+            {
+               if(h1Rates[k].high > hh1) hh1 = h1Rates[k].high;
+               if(h1Rates[k].low  < ll1) ll1 = h1Rates[k].low;
+            }
+            m_state.htfSwingHigh    = hh1;
+            m_state.htfSwingLow     = ll1;
+            m_state.htfSwingBarTime = curH1Time;
+         }
+      }
+
       double effAtr = (atr > 0.0) ? atr : MathMax(1e-6, (rHigh - rLow) * 0.1);
       double rangeSpan = m_state.rangeHigh - m_state.rangeLow;
       m_state.rangeWidthAtr = rangeSpan / effAtr;
@@ -247,23 +276,55 @@ public:
       double lastClose = rates[0].close;
       double prevClose = rates[1].close;
 
-      // Nearest S/R strictly below/above close so breakouts never invert anchors
+      // Nearest S/R strictly below/above close, rejecting old pivots already sliced through by >= 2 closes
       double bestSup = 0.0, bestRes = 0.0;
       double minSupDist = 1e18, minResDist = 1e18;
-      for(int i = 0; i < slCount; i++)
+      int supIdx = -1, resIdx = -1;
+
+      for(int pass = 0; pass < 2 && (bestSup <= 0.0 || bestRes <= 0.0); pass++)
       {
-         if(swingLows[i] <= lastClose && (lastClose - swingLows[i]) < minSupDist)
+         bool requireUnbroken = (pass == 0);
+         if(bestSup <= 0.0)
          {
-            minSupDist = lastClose - swingLows[i];
-            bestSup = swingLows[i];
+            for(int i = 0; i < slCount; i++)
+            {
+               if(swingLows[i] > lastClose) continue;
+               bool intact = true;
+               if(requireUnbroken)
+               {
+                  int closesBelow = 0;
+                  for(int b = 1; b < swingLowBars[i]; b++)
+                     if(rates[b].close < swingLows[i] - zoneTol * 0.65) closesBelow++;
+                  if(closesBelow >= 2) intact = false;
+               }
+               if(intact && (lastClose - swingLows[i]) < minSupDist)
+               {
+                  minSupDist = lastClose - swingLows[i];
+                  bestSup = swingLows[i];
+                  supIdx = swingLowBars[i];
+               }
+            }
          }
-      }
-      for(int i = 0; i < shCount; i++)
-      {
-         if(swingHighs[i] >= lastClose && (swingHighs[i] - lastClose) < minResDist)
+         if(bestRes <= 0.0)
          {
-            minResDist = swingHighs[i] - lastClose;
-            bestRes = swingHighs[i];
+            for(int i = 0; i < shCount; i++)
+            {
+               if(swingHighs[i] < lastClose) continue;
+               bool intact = true;
+               if(requireUnbroken)
+               {
+                  int closesAbove = 0;
+                  for(int b = 1; b < swingHighBars[i]; b++)
+                     if(rates[b].close > swingHighs[i] + zoneTol * 0.65) closesAbove++;
+                  if(closesAbove >= 2) intact = false;
+               }
+               if(intact && (swingHighs[i] - lastClose) < minResDist)
+               {
+                  minResDist = swingHighs[i] - lastClose;
+                  bestRes = swingHighs[i];
+                  resIdx = swingHighBars[i];
+               }
+            }
          }
       }
       if(bestSup <= 0.0 && m_state.rangeLow < lastClose)
@@ -274,8 +335,28 @@ public:
       m_state.nearestSupport    = bestSup;
       m_state.nearestResistance = bestRes;
 
-      m_state.supportRejectCount    = CountZoneRejections(rates, MathMin(30, total), m_state.nearestSupport, zoneTol, false);
-      m_state.resistanceRejectCount = CountZoneRejections(rates, MathMin(30, total), m_state.nearestResistance, zoneTol, true);
+      int supLook = (supIdx > 0) ? MathMin(MathMax(15, supIdx + 2), 40) : MathMin(30, total);
+      int resLook = (resIdx > 0) ? MathMin(MathMax(15, resIdx + 2), 40) : MathMin(30, total);
+      m_state.supportRejectCount    = CountZoneRejections(rates, supLook, m_state.nearestSupport, zoneTol, false);
+      m_state.resistanceRejectCount = CountZoneRejections(rates, resLook, m_state.nearestResistance, zoneTol, true);
+
+      // Major Graph Extremum & Equilibrium Mapping (Discount <= 38% / Premium >= 62%)
+      double majH = m_state.rangeHigh;
+      double majL = m_state.rangeLow;
+      int shMapN = MathMin(3, shCount);
+      for(int i = 0; i < shMapN; i++)
+         if(swingHighs[i] > majH) majH = swingHighs[i];
+      int slMapN = MathMin(3, slCount);
+      for(int i = 0; i < slMapN; i++)
+         if(swingLows[i] < majL) majL = swingLows[i];
+
+      m_state.swingHigh        = majH;
+      m_state.swingLow         = majL;
+      m_state.swingEquilibrium = (majH + majL) * 0.5;
+      double majSpan           = majH - majL;
+      m_state.swingRangePos01  = (majSpan > 0.0) ? MathMax(0.0, MathMin(1.0, (lastClose - majL) / majSpan)) : 0.5;
+      m_state.isDiscountZone   = (m_state.swingRangePos01 <= 0.38);
+      m_state.isPremiumZone    = (m_state.swingRangePos01 >= 0.62);
 
       m_state.lastEvent = STRUCT_NONE;
       m_state.structureBias = 0;

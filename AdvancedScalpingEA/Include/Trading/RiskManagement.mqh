@@ -1,7 +1,7 @@
 //+------------------------------------------------------------------+
 //|                                               RiskManagement.mqh |
 //|                        Advanced Multi-Market MT5 Scalping EA     |
-//|                        v2.9.0 Portfolio & Currency Risk Engine   |
+//|                        v3.0.0 Portfolio & Currency Risk Engine   |
 //+------------------------------------------------------------------+
 #ifndef __ASEA_TRADING_RISKMANAGEMENT_MQH__
 #define __ASEA_TRADING_RISKMANAGEMENT_MQH__

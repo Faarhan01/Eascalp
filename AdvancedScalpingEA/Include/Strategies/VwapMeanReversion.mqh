@@ -1,7 +1,7 @@
 //+------------------------------------------------------------------+
 //|                                            VwapMeanReversion.mqh |
 //|                        Advanced Multi-Market MT5 Scalping EA     |
-//|                        v2.9.0 Strategy 9: VWAP Band Reversion    |
+//|                        v3.1.0 Strategy 9: VWAP Band Reversion    |
 //+------------------------------------------------------------------+
 #ifndef __ASEA_STRATEGIES_VWAPMEANREVERSION_MQH__
 #define __ASEA_STRATEGIES_VWAPMEANREVERSION_MQH__
@@ -16,14 +16,14 @@ private:
 public:
    CStrategyVwapMeanReversion() : CStrategyBase(STRAT_VWAP_REVERSION, "VWAP Reversion")
    {
-      m_minStretchAtr = 1.45;
+      m_minStretchAtr = 1.60;
    }
 
    void Configure(const bool enabled, const double slMult, const double tpMult, const int minSample,
-                  const double minStretchAtr = 1.45)
+                  const double minStretchAtr = 1.60)
    {
       ConfigureBase(enabled, slMult, tpMult, minSample);
-      m_minStretchAtr = MathMax(0.95, MathMin(3.0, minStretchAtr));
+      m_minStretchAtr = MathMax(1.10, MathMin(3.5, minStretchAtr));
    }
 
    virtual ENUM_STRATEGY_SUITABILITY GetRegimeSuitability(const ENUM_MARKET_REGIME regime) const override
@@ -53,12 +53,12 @@ public:
          outRejectReason = "VWAP or indicators unavailable";
          return false;
       }
-      if(ctx.ind.adxMain > 27.5 && !ctx.ind.bullDivergence && !ctx.ind.bearDivergence)
+      if(ctx.ind.adxMain > 22.0 && !ctx.ind.bullDivergence && !ctx.ind.bearDivergence)
       {
          outRejectReason = StringFormat("ADX %.1f too strongly directional for VWAP fade", ctx.ind.adxMain);
          return false;
       }
-      if(ctx.market.spreadRatio > 1.75)
+      if(ctx.market.spreadRatio > 1.70)
       {
          outRejectReason = StringFormat("Spread ratio %.2f too wide for VWAP reversion", ctx.market.spreadRatio);
          return false;
@@ -68,63 +68,78 @@ public:
       double barRange = MathMax(ctx.market.high - ctx.market.low, ctx.symbolProfile.point);
       double body = MathAbs(ctx.market.close - ctx.market.open);
       double effSlMult = GetEffectiveSlMult(ctx, 0.95);
-      double effTpMult = GetEffectiveTpMult(ctx, 0.92);
+      double effTpMult = GetEffectiveTpMult(ctx, 0.95);
 
-      // Oversold stretch below Session VWAP + lower Bollinger outer envelope
-      bool bullStretch = (vwapDistAtr <= -m_minStretchAtr) &&
-                         (ctx.market.low <= ctx.ind.bbLower + ctx.ind.atr * 0.15) &&
-                         (ctx.ind.rsi <= 39.0 || ctx.ind.cci <= -105.0 || ctx.ind.wpr <= -68.0);
+      // Oversold stretch below Session VWAP + lower Bollinger outer envelope + sigma & discount check
+      bool bullZOk = (ctx.ind.vwapStdDev <= 0.0 || ctx.ind.vwapZScore <= -1.25);
+      bool bearZOk = (ctx.ind.vwapStdDev <= 0.0 || ctx.ind.vwapZScore >= 1.25);
+      bool bullLocOk = (!ctx.structure.isReady || ctx.structure.isDiscountZone || ctx.ind.donchianPos01 <= 0.25);
+      bool bearLocOk = (!ctx.structure.isReady || ctx.structure.isPremiumZone || ctx.ind.donchianPos01 >= 0.75);
+
+      bool bullStretch = (vwapDistAtr <= -m_minStretchAtr) && bullZOk && bullLocOk &&
+                         (ctx.market.low <= ctx.ind.bbLower + ctx.ind.atr * 0.10) &&
+                         (ctx.ind.rsi <= 35.0 || ctx.ind.cci <= -120.0 || ctx.ind.bullDivergence);
       bool bullReversalBar = (ctx.market.close > ctx.market.open) &&
-                             (body >= barRange * 0.22) &&
-                             ((ctx.market.close - ctx.market.low) >= barRange * 0.56) &&
+                             (body >= barRange * 0.25) &&
+                             ((ctx.market.close - ctx.market.low) >= barRange * 0.58) &&
                              (ctx.ind.rsi > ctx.ind.prevRsi || ctx.ind.macdHist > ctx.ind.prevMacdHist) &&
                              (ctx.candle.bias != SIGNAL_SELL);
-      bool bullHtfAllowed = (ctx.mtf.higherBias != SIGNAL_SELL) || (ctx.ind.bullDivergence || ctx.regime.efficiencyRatio < 0.28);
+      bool bullHtfAllowed = (ctx.mtf.higherBias != SIGNAL_SELL) || (ctx.ind.bullDivergence && vwapDistAtr <= -1.95);
 
       if(bullStretch && bullReversalBar && bullHtfAllowed)
       {
          double slDist = ComputeStructuralSLDist(ctx, SIGNAL_BUY, effSlMult, effSlMult * 1.25);
-         double vwapRoom = (ctx.ind.vwap - ctx.market.ask) * 0.92;
-         if(vwapRoom < slDist * 1.35)
+         if(!HasClearRoomToTarget(ctx, SIGNAL_BUY, slDist, false))
          {
-            outRejectReason = "Distance back to Session VWAP insufficient for positive R:R";
+            outRejectReason = "VWAP reversion BUY blocked near active overhead resistance";
             return false;
          }
-         double tpDist = MathMax(slDist * 1.45, MathMin(ctx.ind.atr * effTpMult, vwapRoom));
-         double rawConf = (MathAbs(vwapDistAtr) >= 1.85) ? 0.83 : 0.77;
+         double vwapRoom = (ctx.ind.vwap - ctx.market.ask) * 0.95;
+         if(vwapRoom < slDist * 1.55)
+         {
+            outRejectReason = "Distance back to Session VWAP insufficient for >=1.55 R:R";
+            return false;
+         }
+         double tpDist = MathMax(slDist * 1.55, MathMin(ctx.ind.atr * effTpMult, vwapRoom));
+         double rawConf = (MathAbs(vwapDistAtr) >= 1.95 || ctx.ind.vwapZScore <= -1.8) ? 0.86 : 0.80;
          PopulateCommonSignal(outSignal, ctx, SIGNAL_BUY, slDist, tpDist, rawConf,
-                              StringFormat("Bullish VWAP reversion stretch (%.2f ATR below VWAP) + outer BB curl", MathAbs(vwapDistAtr)),
-                              StringFormat("VWAP_Dist=%.2fATR, RSI=%.1f, CCI=%.0f, ADX=%.1f", vwapDistAtr, ctx.ind.rsi, ctx.ind.cci, ctx.ind.adxMain),
+                              StringFormat("Bullish VWAP reversion stretch (%.2f ATR, Z=%.1f) + discount BB curl", MathAbs(vwapDistAtr), ctx.ind.vwapZScore),
+                              StringFormat("VWAP_Dist=%.2fATR, Z=%.2f, RSI=%.1f, CCI=%.0f, ADX=%.1f", vwapDistAtr, ctx.ind.vwapZScore, ctx.ind.rsi, ctx.ind.cci, ctx.ind.adxMain),
                               ctx.structure.summary, ctx.candle.name,
                               ctx.mtf.higherBias == SIGNAL_SELL ? "Counter-HTF reversion" : "None");
          return true;
       }
 
-      // Overbought stretch above Session VWAP + upper Bollinger outer envelope
-      bool bearStretch = (vwapDistAtr >= m_minStretchAtr) &&
-                         (ctx.market.high >= ctx.ind.bbUpper - ctx.ind.atr * 0.15) &&
-                         (ctx.ind.rsi >= 61.0 || ctx.ind.cci >= 105.0 || ctx.ind.wpr >= -32.0);
+      // Overbought stretch above Session VWAP + upper Bollinger outer envelope + sigma & premium check
+      bool bearStretch = (vwapDistAtr >= m_minStretchAtr) && bearZOk && bearLocOk &&
+                         (ctx.market.high >= ctx.ind.bbUpper - ctx.ind.atr * 0.10) &&
+                         (ctx.ind.rsi >= 65.0 || ctx.ind.cci >= 120.0 || ctx.ind.bearDivergence);
       bool bearReversalBar = (ctx.market.close < ctx.market.open) &&
-                             (body >= barRange * 0.22) &&
-                             ((ctx.market.high - ctx.market.close) >= barRange * 0.56) &&
+                             (body >= barRange * 0.25) &&
+                             ((ctx.market.high - ctx.market.close) >= barRange * 0.58) &&
                              (ctx.ind.rsi < ctx.ind.prevRsi || ctx.ind.macdHist < ctx.ind.prevMacdHist) &&
                              (ctx.candle.bias != SIGNAL_BUY);
-      bool bearHtfAllowed = (ctx.mtf.higherBias != SIGNAL_BUY) || (ctx.ind.bearDivergence || ctx.regime.efficiencyRatio < 0.28);
+      bool bearHtfAllowed = (ctx.mtf.higherBias != SIGNAL_BUY) || (ctx.ind.bearDivergence && vwapDistAtr >= 1.95);
 
       if(bearStretch && bearReversalBar && bearHtfAllowed)
       {
          double slDist = ComputeStructuralSLDist(ctx, SIGNAL_SELL, effSlMult, effSlMult * 1.25);
-         double vwapRoom = (ctx.market.bid - ctx.ind.vwap) * 0.92;
-         if(vwapRoom < slDist * 1.35)
+         if(!HasClearRoomToTarget(ctx, SIGNAL_SELL, slDist, false))
          {
-            outRejectReason = "Distance back to Session VWAP insufficient for positive R:R";
+            outRejectReason = "VWAP reversion SELL blocked near active floor support";
             return false;
          }
-         double tpDist = MathMax(slDist * 1.45, MathMin(ctx.ind.atr * effTpMult, vwapRoom));
-         double rawConf = (MathAbs(vwapDistAtr) >= 1.85) ? 0.83 : 0.77;
+         double vwapRoom = (ctx.market.bid - ctx.ind.vwap) * 0.95;
+         if(vwapRoom < slDist * 1.55)
+         {
+            outRejectReason = "Distance back to Session VWAP insufficient for >=1.55 R:R";
+            return false;
+         }
+         double tpDist = MathMax(slDist * 1.55, MathMin(ctx.ind.atr * effTpMult, vwapRoom));
+         double rawConf = (MathAbs(vwapDistAtr) >= 1.95 || ctx.ind.vwapZScore >= 1.8) ? 0.86 : 0.80;
          PopulateCommonSignal(outSignal, ctx, SIGNAL_SELL, slDist, tpDist, rawConf,
-                              StringFormat("Bearish VWAP reversion stretch (+%.2f ATR above VWAP) + outer BB curl", vwapDistAtr),
-                              StringFormat("VWAP_Dist=%.2fATR, RSI=%.1f, CCI=%.0f, ADX=%.1f", vwapDistAtr, ctx.ind.rsi, ctx.ind.cci, ctx.ind.adxMain),
+                              StringFormat("Bearish VWAP reversion stretch (+%.2f ATR, Z=%.1f) + premium BB curl", vwapDistAtr, ctx.ind.vwapZScore),
+                              StringFormat("VWAP_Dist=%.2fATR, Z=%.2f, RSI=%.1f, CCI=%.0f, ADX=%.1f", vwapDistAtr, ctx.ind.vwapZScore, ctx.ind.rsi, ctx.ind.cci, ctx.ind.adxMain),
                               ctx.structure.summary, ctx.candle.name,
                               ctx.mtf.higherBias == SIGNAL_BUY ? "Counter-HTF reversion" : "None");
          return true;
@@ -136,15 +151,19 @@ public:
 
    virtual bool ShouldExitPosition(const SManagedPosition &pos, const SAnalysisContext &ctx, string &outExitReason) const override
    {
-      if(pos.holdingSeconds < 120 || !ctx.ind.isReady || !ctx.ind.vwapAvailable || ctx.ind.vwap <= 0.0) return false;
-      if(pos.direction == SIGNAL_BUY && pos.floatingPnL > 0.0 && ctx.market.close >= ctx.ind.vwap + ctx.ind.atr * 0.10)
+      if(pos.holdingSeconds < 300 || !ctx.ind.isReady || !ctx.ind.vwapAvailable || ctx.ind.vwap <= 0.0 || pos.floatingPnL <= 0.0) return false;
+      double initSlDist = (pos.initialSL > 0.0) ? MathAbs(pos.openPrice - pos.initialSL) : ctx.ind.atr * 1.65;
+      double profitDist = (pos.direction == SIGNAL_BUY) ? (pos.currentPrice - pos.openPrice) : (pos.openPrice - pos.currentPrice);
+      if(profitDist < initSlDist * 1.40) return false;
+
+      if(pos.direction == SIGNAL_BUY && (ctx.market.close >= ctx.ind.bbUpper || ctx.ind.rsi >= 72.0))
       {
-         outExitReason = "VWAPReversion exit: profitable mean reversion completed above VWAP";
+         outExitReason = "VWAPReversion exit: >=1.4R reversion reached opposing OB/BB extreme";
          return true;
       }
-      if(pos.direction == SIGNAL_SELL && pos.floatingPnL > 0.0 && ctx.market.close <= ctx.ind.vwap - ctx.ind.atr * 0.10)
+      if(pos.direction == SIGNAL_SELL && (ctx.market.close <= ctx.ind.bbLower || ctx.ind.rsi <= 28.0))
       {
-         outExitReason = "VWAPReversion exit: profitable mean reversion completed below VWAP";
+         outExitReason = "VWAPReversion exit: >=1.4R reversion reached opposing OS/BB extreme";
          return true;
       }
       return false;

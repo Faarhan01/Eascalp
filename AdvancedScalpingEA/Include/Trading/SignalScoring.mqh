@@ -1,7 +1,7 @@
 //+------------------------------------------------------------------+
 //|                                                SignalScoring.mqh |
 //|                        Advanced Multi-Market MT5 Scalping EA     |
-//|                        v2.9.0 Non-Redundant 0-100 Scoring Engine |
+//|                        v3.1.0 Non-Redundant 0-100 Scoring Engine |
 //+------------------------------------------------------------------+
 #ifndef __ASEA_TRADING_SIGNALSCORING_MQH__
 #define __ASEA_TRADING_SIGNALSCORING_MQH__
@@ -31,7 +31,7 @@ private:
 public:
    CSignalScoring()
    {
-      m_minScoreThreshold = 60.0;
+      m_minScoreThreshold = 64.0;
    }
 
    void Configure(const double minScoreThreshold)
@@ -146,7 +146,24 @@ public:
          }
       }
 
-      // Previous Daily High/Low (PDH/PDL) institutional reference awareness
+      // Graph Swing Extremum / Value-Zone & HTF wall confluence
+      if(ctx.structure.isReady && sig.strategyId != STRAT_BREAKOUT_SCALPING && sig.strategyId != STRAT_VOLATILITY_EXPANSION)
+      {
+         if(isRevOrMeanRev || sig.strategyId == STRAT_RANGE_SCALPING)
+         {
+            if((dirSign > 0 && ctx.structure.isDiscountZone) || (dirSign < 0 && ctx.structure.isPremiumZone))
+               b.structureScore = MathMin(14.0, b.structureScore + 1.5);
+         }
+         else
+         {
+            if((dirSign > 0 && ctx.structure.swingRangePos01 <= 0.55) || (dirSign < 0 && ctx.structure.swingRangePos01 >= 0.45))
+               b.structureScore = MathMin(14.0, b.structureScore + 1.0);
+            else if((dirSign > 0 && ctx.structure.swingRangePos01 >= 0.78) || (dirSign < 0 && ctx.structure.swingRangePos01 <= 0.22))
+               b.structureScore = MathMax(0.0, b.structureScore - 2.0);
+         }
+      }
+
+      // Previous Daily High/Low (PDH/PDL) & H1 HTF swing boundary institutional reference awareness
       if(ctx.structure.prevDayHigh > 0.0 && ctx.structure.prevDayLow > 0.0 && ctx.ind.atr > 0.0)
       {
          if(isRevOrMeanRev || sig.strategyId == STRAT_RANGE_SCALPING)
@@ -162,7 +179,11 @@ public:
                                  (ctx.structure.prevDayHigh - ctx.market.close) < ctx.ind.atr * 0.55);
             bool blockedByPdl = (dirSign < 0 && ctx.market.close > ctx.structure.prevDayLow &&
                                  (ctx.market.close - ctx.structure.prevDayLow) < ctx.ind.atr * 0.55);
-            if(blockedByPdh || blockedByPdl)
+            bool blockedByHtfHi = (dirSign > 0 && ctx.structure.htfSwingHigh > ctx.market.close &&
+                                   (ctx.structure.htfSwingHigh - ctx.market.close) < ctx.ind.atr * 0.55);
+            bool blockedByHtfLo = (dirSign < 0 && ctx.structure.htfSwingLow > 0.0 && ctx.market.close > ctx.structure.htfSwingLow &&
+                                   (ctx.market.close - ctx.structure.htfSwingLow) < ctx.ind.atr * 0.55);
+            if(blockedByPdh || blockedByPdl || blockedByHtfHi || blockedByHtfLo)
                b.structureScore = MathMax(0.0, b.structureScore - 2.0);
          }
       }
@@ -177,6 +198,7 @@ public:
       else
       {
          double adxPts = MathMin(6.0, MathMax(0.5, ((ctx.ind.adxMain - 10.0) / 25.0) * 6.0));
+         if(ctx.ind.adxRising) adxPts = MathMin(6.0, adxPts + 0.5);
          double emaPts = ((dirSign > 0 && emaBull) || (dirSign < 0 && emaBear)) ? 4.0 :
                          (((dirSign > 0 && ctx.ind.emaFast > ctx.ind.emaMedium) || (dirSign < 0 && ctx.ind.emaFast < ctx.ind.emaMedium)) ? 2.0 : 0.0);
          double ribbonBonus = (sig.strategyId == STRAT_EMA_RIBBON &&
@@ -271,21 +293,21 @@ public:
 
       // 10. Strategy suitability & validated historical performance (0..8)
       double suitPart = (suitability == SUIT_SUITABLE) ? 4.5 : ((suitability == SUIT_CONDITIONAL) ? 2.0 : 0.0);
-      double histPart = 1.5; // modest cold-start prior
+      double histPart = 1.0; // lean cold-start prior
       double perfAdj = 0.0;
       if(stratStats.hasSufficientSample)
       {
          if(stratStats.profitFactor >= 1.35 && !stratStats.deteriorationWarning)
          {
             histPart = 3.5;
-            perfAdj = 3.0;
+            perfAdj = 3.5;
          }
          else if(stratStats.profitFactor >= 1.05 && !stratStats.deteriorationWarning)
             histPart = 2.5;
-         else if(stratStats.deteriorationWarning || stratStats.profitFactor < 0.85)
+         else if(stratStats.deteriorationWarning || stratStats.profitFactor < 0.92)
          {
             histPart = 0.0;
-            perfAdj = -7.0;
+            perfAdj = -9.0;
          }
          else
             histPart = 0.5;
@@ -293,11 +315,44 @@ public:
       b.strategySuitScore = suitPart + histPart;
 
       double htfCounterPenalty = (opposesHtf && !allowCounterHtfTol) ? -9.0 : 0.0;
+      double htfNeutralPenalty = (!allowCounterHtfTol && ctx.mtf.higherBias == SIGNAL_NONE) ? -4.0 : 0.0;
+      double rrAdj = 0.0;
+      if(sig.entryPrice > 0.0 && sig.stopLoss > 0.0 && sig.takeProfit > 0.0)
+      {
+         double slD = MathAbs(sig.entryPrice - sig.stopLoss);
+         double tpD = MathAbs(sig.takeProfit - sig.entryPrice);
+         if(slD > 0.0)
+         {
+            double rr = tpD / slD;
+            if(rr < 1.50)       rrAdj = -4.5;
+            else if(rr >= 1.85) rrAdj = 2.5;
+         }
+      }
+
+      double dnaAdj = 0.0;
+      if(ctx.symbolProfile.empiricalProfileReady)
+      {
+         double aff = 1.0;
+         if(sig.strategyId == STRAT_LIQUIDITY_SWEEP)
+            aff = ctx.assetProfile.sweepAffinity;
+         else if(sig.strategyId == STRAT_RANGE_SCALPING || sig.strategyId == STRAT_VWAP_REVERSION || sig.strategyId == STRAT_REVERSAL_SCALPING)
+            aff = ctx.assetProfile.meanRevAffinity;
+         else
+            aff = ctx.assetProfile.trendAffinity;
+         dnaAdj = MathMax(-3.0, MathMin(3.5, (aff - 1.0) * 10.0));
+      }
+
+      double vwapZBonus = 0.0;
+      if(isRevOrMeanRev && ctx.ind.vwapAvailable && ctx.ind.vwapStdDev > 0.0)
+      {
+         if((dirSign > 0 && ctx.ind.vwapZScore <= -1.6) || (dirSign < 0 && ctx.ind.vwapZScore >= 1.6))
+            vwapZBonus = 1.5;
+      }
 
       b.totalScore = b.regimeScore + b.structureScore + b.trendStrengthScore +
                      b.momentumScore + b.volatilityScore + b.patternConfluence +
                      b.mtfAgreementScore + b.tickEdgeScore + b.executionCostScore +
-                     b.strategySuitScore + perfAdj + htfCounterPenalty;
+                     b.strategySuitScore + perfAdj + htfCounterPenalty + htfNeutralPenalty + rrAdj + dnaAdj + vwapZBonus;
       b.totalScore = MathMax(0.0, MathMin(100.0, b.totalScore));
       b.isValidatedScore = stratStats.hasSufficientSample;
       b.band = ClassifyBand(sig.direction, b.totalScore);

@@ -1,7 +1,7 @@
 //+------------------------------------------------------------------+
 //|                                              DashboardCharts.mqh |
 //|                        Advanced Multi-Market MT5 Scalping EA     |
-//|                        v2.9.0 CCanvas Analytics Visualizations   |
+//|                        v3.0.0 CCanvas Analytics Visualizations   |
 //+------------------------------------------------------------------+
 #ifndef __ASEA_DASHBOARD_DASHBOARDCHARTS_MQH__
 #define __ASEA_DASHBOARD_DASHBOARDCHARTS_MQH__

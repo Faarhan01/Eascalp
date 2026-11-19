@@ -1,7 +1,7 @@
 //+------------------------------------------------------------------+
 //|                                                  Diagnostics.mqh |
 //|                        Advanced Multi-Market MT5 Scalping EA     |
-//|                        v2.9.0 Structured Logging & Diagnostics   |
+//|                        v3.0.0 Structured Logging & Diagnostics   |
 //+------------------------------------------------------------------+
 #ifndef __ASEA_CORE_DIAGNOSTICS_MQH__
 #define __ASEA_CORE_DIAGNOSTICS_MQH__

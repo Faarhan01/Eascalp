@@ -1,7 +1,7 @@
 //+------------------------------------------------------------------+
 //|                                                   Statistics.mqh |
 //|                        Advanced Multi-Market MT5 Scalping EA     |
-//|                        v2.9.0 Quantitative & Segmented Helpers   |
+//|                        v3.0.0 Quantitative & Segmented Helpers   |
 //+------------------------------------------------------------------+
 #ifndef __ASEA_ANALYTICS_STATISTICS_MQH__
 #define __ASEA_ANALYTICS_STATISTICS_MQH__

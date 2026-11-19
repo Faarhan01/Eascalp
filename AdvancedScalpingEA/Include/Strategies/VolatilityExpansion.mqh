@@ -1,7 +1,7 @@
 //+------------------------------------------------------------------+
 //|                                          VolatilityExpansion.mqh |
 //|                        Advanced Multi-Market MT5 Scalping EA     |
-//|                        v2.9.0 Strategy 6: Volatility Expansion   |
+//|                        v3.1.0 Strategy 6: Volatility Expansion   |
 //+------------------------------------------------------------------+
 #ifndef __ASEA_STRATEGIES_VOLATILITYEXPANSION_MQH__
 #define __ASEA_STRATEGIES_VOLATILITYEXPANSION_MQH__
@@ -18,15 +18,15 @@ public:
    CStrategyVolatilityExpansion() : CStrategyBase(STRAT_VOLATILITY_EXPANSION, "Volatility Expansion")
    {
       m_minVolRatio = 1.15;
-      m_minRvol = 0.80;
+      m_minRvol = 1.15;
    }
 
    void Configure(const bool enabled, const double slMult, const double tpMult, const int minSample,
-                  const double minVolRatio, const double minRvol = 0.80)
+                  const double minVolRatio, const double minRvol = 1.15)
    {
       ConfigureBase(enabled, slMult, tpMult, minSample);
-      m_minVolRatio = MathMax(1.05, MathMin(3.0, minVolRatio));
-      m_minRvol = MathMax(0.40, MathMin(3.0, minRvol));
+      m_minVolRatio = MathMax(1.05, MathMin(2.35, minVolRatio));
+      m_minRvol = MathMax(0.50, MathMin(3.0, minRvol));
    }
 
    virtual ENUM_STRATEGY_SUITABILITY GetRegimeSuitability(const ENUM_MARKET_REGIME regime) const override
@@ -35,7 +35,7 @@ public:
          return SUIT_SUITABLE;
       if(regime == REGIME_STRONG_BULL_TREND || regime == REGIME_STRONG_BEAR_TREND ||
          regime == REGIME_WEAK_BULL_TREND || regime == REGIME_WEAK_BEAR_TREND ||
-         regime == REGIME_ABNORMAL_VOLATILITY || regime == REGIME_TIGHT_CONSOLIDATION)
+         regime == REGIME_TIGHT_CONSOLIDATION)
          return SUIT_CONDITIONAL;
       return SUIT_UNSUITABLE;
    }
@@ -48,35 +48,34 @@ public:
       if(!m_enabled) { outRejectReason = "Strategy disabled by input"; return false; }
       if(!IsSuitableForRegime(ctx.regime.regime))
       {
-         outRejectReason = "No volatility expansion/squeeze transition regime: " + ctx.regime.label;
+         outRejectReason = "No clean volatility expansion/squeeze transition regime: " + ctx.regime.label;
          return false;
       }
-      if(!ctx.ind.isReady || ctx.ind.atr <= 0.0 || ctx.symbolProfile.point <= 0.0)
+      if(!ctx.ind.isReady || !ctx.structure.isReady || ctx.ind.atr <= 0.0 || ctx.symbolProfile.point <= 0.0)
       {
-         outRejectReason = "Indicators or ATR unavailable";
+         outRejectReason = "Indicators, structure, or ATR unavailable";
          return false;
       }
-      if(ctx.regime.volatilityRatio < m_minVolRatio && ctx.ind.shortLongVolRatio < m_minVolRatio)
+      double effVol = MathMax(ctx.regime.volatilityRatio, ctx.ind.shortLongVolRatio);
+      if(effVol < m_minVolRatio || ctx.regime.volatilityRatio > 2.35)
       {
-         outRejectReason = StringFormat("ATR ratio %.2f / short-long %.2f below expansion threshold %.2f",
-                                        ctx.regime.volatilityRatio, ctx.ind.shortLongVolRatio, m_minVolRatio);
+         outRejectReason = StringFormat("Volatility ratio %.2f outside expansion corridor [%.2f..2.35]",
+                                        ctx.regime.volatilityRatio, m_minVolRatio);
          return false;
       }
-      if(ctx.market.spreadRatio > 1.85)
+      if(ctx.market.spreadRatio > 1.75)
       {
          outRejectReason = StringFormat("Spread ratio %.2f too wide during expansion", ctx.market.spreadRatio);
          return false;
       }
-
-      // Prevent chasing already-exhausted blow-off spikes or dead low-ADX chop
-      if(ctx.ind.adxMain < 16.0)
+      if(ctx.ind.adxMain < 18.0)
       {
          outRejectReason = StringFormat("ADX %.1f too weak for sustained expansion move", ctx.ind.adxMain);
          return false;
       }
-      if(MathAbs(ctx.ind.emaDistanceAtr) > 1.90 || ctx.ind.momentumExhaustion)
+      if(MathAbs(ctx.ind.emaDistanceAtr) > 1.35 || ctx.ind.momentumExhaustion)
       {
-         outRejectReason = StringFormat("Volatility spike overextended (%.2f ATR from EMA21)", ctx.ind.emaDistanceAtr);
+         outRejectReason = StringFormat("Volatility expansion overextended (%.2f ATR > 1.35 from EMA21)", ctx.ind.emaDistanceAtr);
          return false;
       }
       if(ctx.ticks.isReady && ctx.ticks.momentumDeteriorating)
@@ -90,67 +89,86 @@ public:
          return false;
       }
 
-      // Require expanding BB width from prior compression or strong ATR expansion candle
-      bool bbExpanding = (ctx.ind.bbWidthPct > ctx.ind.prevBbWidthPct * 1.01) ||
+      // Require expanding BB width out of squeeze/inside compression + non-exhausted structural break
+      bool bbExpanding = (ctx.ind.bbWidthPct > ctx.ind.prevBbWidthPct * 1.02) ||
                          (ctx.structure.tightConsolidation || ctx.candle.insideBarCount >= 1);
-      bool impulseBar = (ctx.candle.bodyRatio >= 0.46) && (ctx.candle.relSizeAtr >= 0.85);
-      double barRange = MathMax(ctx.market.high - ctx.market.low, MathMax(ctx.symbolProfile.point, 0.0000001));
-      bool bullCloseConv = ((ctx.market.close - ctx.market.low) >= barRange * 0.60);
-      bool bearCloseConv = ((ctx.market.high - ctx.market.close) >= barRange * 0.60);
-      bool bullMtfTailwind = (ctx.mtf.higherBias == SIGNAL_BUY) || (ctx.mtf.higherBias == SIGNAL_NONE && ctx.mtf.intermediateBias == SIGNAL_BUY);
-      bool bearMtfTailwind = (ctx.mtf.higherBias == SIGNAL_SELL) || (ctx.mtf.higherBias == SIGNAL_NONE && ctx.mtf.intermediateBias == SIGNAL_SELL);
+      bool impulseBar = (ctx.candle.bodyRatio >= 0.48) && (ctx.candle.relSizeAtr >= 0.85);
+      double barRange = MathMax(ctx.market.high - ctx.market.low, ctx.symbolProfile.point);
+      bool bullCloseConv = ((ctx.market.close - ctx.market.low) >= barRange * 0.62);
+      bool bearCloseConv = ((ctx.market.high - ctx.market.close) >= barRange * 0.62);
+      bool bullMtfTailwind = (ctx.mtf.higherBias == SIGNAL_BUY && ctx.mtf.intermediateBias != SIGNAL_SELL);
+      bool bearMtfTailwind = (ctx.mtf.higherBias == SIGNAL_SELL && ctx.mtf.intermediateBias != SIGNAL_BUY);
       double effSlMult = GetEffectiveSlMult(ctx, 1.08);
       double effTpMult = GetEffectiveTpMult(ctx, 1.15);
 
+      bool bullBreakRoom = (ctx.market.close > ctx.ind.bbMiddle) &&
+                           (ctx.structure.swingRangePos01 <= 0.80 || ctx.structure.lastEvent == STRUCT_BOS_BULL || ctx.structure.lastEvent == STRUCT_BREAKOUT_UP) &&
+                           (ctx.market.close > ctx.structure.lastSwingHigh || ctx.market.close > ctx.structure.rangeHigh || ctx.structure.lastEvent == STRUCT_BOS_BULL || ctx.structure.lastEvent == STRUCT_BREAKOUT_UP);
+      bool bearBreakRoom = (ctx.market.close < ctx.ind.bbMiddle) &&
+                           (ctx.structure.swingRangePos01 >= 0.20 || ctx.structure.lastEvent == STRUCT_BOS_BEAR || ctx.structure.lastEvent == STRUCT_BREAKOUT_DOWN) &&
+                           (ctx.market.close < ctx.structure.lastSwingLow || (ctx.structure.rangeLow > 0.0 && ctx.market.close < ctx.structure.rangeLow) || ctx.structure.lastEvent == STRUCT_BOS_BEAR || ctx.structure.lastEvent == STRUCT_BREAKOUT_DOWN);
+
       if(bbExpanding && impulseBar && bullCloseConv && ctx.market.close > ctx.market.open &&
-         ctx.market.close > ctx.ind.bbUpper && ctx.ind.rsi < 71.0 &&
+         bullBreakRoom && ctx.ind.rsi >= 50.0 && ctx.ind.rsi < 68.0 &&
          ctx.ind.macdHist > 0.0 && ctx.ind.emaFast > ctx.ind.emaMedium &&
          bullMtfTailwind)
       {
-         double slDist = ComputeStructuralSLDist(ctx, SIGNAL_BUY, effSlMult, effSlMult * 1.35);
+         double slDist = ComputeStructuralSLDist(ctx, SIGNAL_BUY, effSlMult, effSlMult * 1.25);
+         if(!HasClearRoomToTarget(ctx, SIGNAL_BUY, slDist, true))
+         {
+            outRejectReason = "Volatility expansion blocked directly below PDH / HTF ceiling";
+            return false;
+         }
          double tpMultEff = ctx.mtf.alignedBullish ? (effTpMult * 1.15) : effTpMult;
-         double tpDist = MathMax(slDist * 1.55, ctx.ind.atr * tpMultEff);
-         PopulateCommonSignal(outSignal, ctx, SIGNAL_BUY, slDist, tpDist, 0.80,
+         double tpDist = MathMax(slDist * 1.65, ctx.ind.atr * tpMultEff);
+         PopulateCommonSignal(outSignal, ctx, SIGNAL_BUY, slDist, tpDist, 0.83,
                               "Bullish volatility expansion out of compression aligned with HTF",
-                              StringFormat("VolRatio=%.2f, ADX=%.1f, BB_W=%.2f%%, RVOL=%.2f, TickAct=%.2f",
-                                           ctx.regime.volatilityRatio, ctx.ind.adxMain, ctx.ind.bbWidthPct, ctx.ind.relativeVolume, ctx.ticks.activityRatio),
+                              StringFormat("VolRatio=%.2f, ADX=%.1f, BB_W=%.2f%%, RVOL=%.2f, Ext=%.2fATR",
+                                           ctx.regime.volatilityRatio, ctx.ind.adxMain, ctx.ind.bbWidthPct, ctx.ind.relativeVolume, ctx.ind.emaDistanceAtr),
                               ctx.structure.summary, ctx.candle.name,
                               ctx.mtf.hasStrongConflict ? ctx.mtf.conflictReason : "None");
+         ComputeOptimalPullbackTrigger(outSignal, ctx, 0.22);
          return true;
       }
 
       if(bbExpanding && impulseBar && bearCloseConv && ctx.market.close < ctx.market.open &&
-         ctx.market.close < ctx.ind.bbLower && ctx.ind.rsi > 29.0 &&
+         bearBreakRoom && ctx.ind.rsi <= 50.0 && ctx.ind.rsi > 32.0 &&
          ctx.ind.macdHist < 0.0 && ctx.ind.emaFast < ctx.ind.emaMedium &&
          bearMtfTailwind)
       {
-         double slDist = ComputeStructuralSLDist(ctx, SIGNAL_SELL, effSlMult, effSlMult * 1.35);
+         double slDist = ComputeStructuralSLDist(ctx, SIGNAL_SELL, effSlMult, effSlMult * 1.25);
+         if(!HasClearRoomToTarget(ctx, SIGNAL_SELL, slDist, true))
+         {
+            outRejectReason = "Volatility expansion blocked directly above PDL / HTF floor";
+            return false;
+         }
          double tpMultEff = ctx.mtf.alignedBearish ? (effTpMult * 1.15) : effTpMult;
-         double tpDist = MathMax(slDist * 1.55, ctx.ind.atr * tpMultEff);
-         PopulateCommonSignal(outSignal, ctx, SIGNAL_SELL, slDist, tpDist, 0.80,
+         double tpDist = MathMax(slDist * 1.65, ctx.ind.atr * tpMultEff);
+         PopulateCommonSignal(outSignal, ctx, SIGNAL_SELL, slDist, tpDist, 0.83,
                               "Bearish volatility expansion out of compression aligned with HTF",
-                              StringFormat("VolRatio=%.2f, ADX=%.1f, BB_W=%.2f%%, RVOL=%.2f, TickAct=%.2f",
-                                           ctx.regime.volatilityRatio, ctx.ind.adxMain, ctx.ind.bbWidthPct, ctx.ind.relativeVolume, ctx.ticks.activityRatio),
+                              StringFormat("VolRatio=%.2f, ADX=%.1f, BB_W=%.2f%%, RVOL=%.2f, Ext=%.2fATR",
+                                           ctx.regime.volatilityRatio, ctx.ind.adxMain, ctx.ind.bbWidthPct, ctx.ind.relativeVolume, ctx.ind.emaDistanceAtr),
                               ctx.structure.summary, ctx.candle.name,
                               ctx.mtf.hasStrongConflict ? ctx.mtf.conflictReason : "None");
+         ComputeOptimalPullbackTrigger(outSignal, ctx, 0.22);
          return true;
       }
 
-      outRejectReason = "Volatility expansion lacking compression transition + close conviction + MTF tailwind";
+      outRejectReason = "Volatility expansion lacking compression breakout + HTF alignment";
       return false;
    }
 
    virtual bool ShouldExitPosition(const SManagedPosition &pos, const SAnalysisContext &ctx, string &outExitReason) const override
    {
-      if(pos.holdingSeconds < 120 || !ctx.ind.isReady) return false;
-      if(pos.direction == SIGNAL_BUY && ctx.market.close < ctx.ind.bbMiddle && ctx.ind.macdHist < 0.0)
+      if(pos.holdingSeconds < 600 || !ctx.ind.isReady) return false;
+      if(pos.direction == SIGNAL_BUY && ctx.market.close < ctx.ind.emaSlow && ctx.ind.macdHist < 0.0 && ctx.mtf.higherBias == SIGNAL_SELL)
       {
-         outExitReason = "VolExpansion exit: expansion failed back below BB midline";
+         outExitReason = "VolExpansion exit: close below EMA55 + HTF & MACD bearish flip";
          return true;
       }
-      if(pos.direction == SIGNAL_SELL && ctx.market.close > ctx.ind.bbMiddle && ctx.ind.macdHist > 0.0)
+      if(pos.direction == SIGNAL_SELL && ctx.market.close > ctx.ind.emaSlow && ctx.ind.macdHist > 0.0 && ctx.mtf.higherBias == SIGNAL_BUY)
       {
-         outExitReason = "VolExpansion exit: expansion failed back above BB midline";
+         outExitReason = "VolExpansion exit: close above EMA55 + HTF & MACD bullish flip";
          return true;
       }
       return false;

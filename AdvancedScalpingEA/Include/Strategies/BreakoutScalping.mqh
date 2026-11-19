@@ -1,7 +1,7 @@
 //+------------------------------------------------------------------+
 //|                                             BreakoutScalping.mqh |
 //|                        Advanced Multi-Market MT5 Scalping EA     |
-//|                        v2.9.0 Retest & Displacement Breakout     |
+//|                        v3.1.0 Retest & Compression Breakout      |
 //+------------------------------------------------------------------+
 #ifndef __ASEA_STRATEGIES_BREAKOUTSCALPING_MQH__
 #define __ASEA_STRATEGIES_BREAKOUTSCALPING_MQH__
@@ -17,16 +17,16 @@ private:
 public:
    CStrategyBreakoutScalping() : CStrategyBase(STRAT_BREAKOUT_SCALPING, "Breakout Scalping")
    {
-      m_minBodyAtrRatio = 0.35;
-      m_minRvol = 0.72;
+      m_minBodyAtrRatio = 0.40;
+      m_minRvol = 1.10;
    }
 
    void Configure(const bool enabled, const double slMult, const double tpMult, const int minSample,
-                  const double minBodyAtrRatio, const double minRvol = 0.72)
+                  const double minBodyAtrRatio, const double minRvol = 1.10)
    {
       ConfigureBase(enabled, slMult, tpMult, minSample);
-      m_minBodyAtrRatio = MathMax(0.2, MathMin(1.5, minBodyAtrRatio));
-      m_minRvol = MathMax(0.40, MathMin(3.0, minRvol));
+      m_minBodyAtrRatio = MathMax(0.25, MathMin(1.5, minBodyAtrRatio));
+      m_minRvol = MathMax(0.50, MathMin(3.0, minRvol));
    }
 
    virtual ENUM_STRATEGY_SUITABILITY GetRegimeSuitability(const ENUM_MARKET_REGIME regime) const override
@@ -37,7 +37,6 @@ public:
       if(regime == REGIME_STRONG_BULL_TREND || regime == REGIME_STRONG_BEAR_TREND ||
          regime == REGIME_ESTABLISHED_BULL || regime == REGIME_ESTABLISHED_BEAR ||
          regime == REGIME_WEAK_BULL_TREND || regime == REGIME_WEAK_BEAR_TREND ||
-         regime == REGIME_ABNORMAL_VOLATILITY ||
          regime == REGIME_SIDEWAYS || regime == REGIME_VOL_CONTRACTION)
          return SUIT_CONDITIONAL;
       return SUIT_UNSUITABLE;
@@ -51,7 +50,7 @@ public:
       if(!m_enabled) { outRejectReason = "Strategy disabled by input"; return false; }
       if(!IsSuitableForRegime(ctx.regime.regime))
       {
-         outRejectReason = "Regime unsuitable for breakout: " + ctx.regime.label;
+         outRejectReason = "Regime unsuitable for breakout (abnormal/chop): " + ctx.regime.label;
          return false;
       }
       if(!ctx.ind.isReady || !ctx.structure.isReady || ctx.ind.atr <= 0.0)
@@ -59,9 +58,9 @@ public:
          outRejectReason = "Structure or indicators not ready";
          return false;
       }
-      if(ctx.structure.failedBreakout || MathAbs(ctx.ind.emaDistanceAtr) > 2.35)
+      if(ctx.structure.failedBreakout || MathAbs(ctx.ind.emaDistanceAtr) > 1.45)
       {
-         outRejectReason = "Recent failed breakout or overextended climax bar — standing aside";
+         outRejectReason = StringFormat("Recent failed breakout or overextended bar (%.2f ATR > 1.45) — standing aside", ctx.ind.emaDistanceAtr);
          return false;
       }
 
@@ -74,37 +73,43 @@ public:
       double barRange = MathMax(ctx.market.high - ctx.market.low, MathMax(ctx.symbolProfile.point, 0.0000001));
       double body = MathAbs(ctx.market.close - ctx.market.open);
       bool strongBody = (body >= ctx.ind.atr * m_minBodyAtrRatio) &&
-                        (body >= barRange * 0.48) &&
-                        (ctx.market.normalizedBarRangeAtr >= 0.70);
+                        (body >= barRange * 0.50) &&
+                        (ctx.market.normalizedBarRangeAtr >= 0.72);
       bool bullCloseConv = ((ctx.market.close - ctx.market.low) >= barRange * 0.62);
       bool bearCloseConv = ((ctx.market.high - ctx.market.close) >= barRange * 0.62);
-      bool activityConfirm = (ctx.regime.volatilityRatio >= 0.90 || ctx.ticks.activityRatio >= 1.05 ||
-                              ctx.market.normalizedBarRangeAtr >= 0.95 || ctx.ind.relativeVolume >= 1.20);
+      bool activityConfirm = (ctx.regime.volatilityRatio >= 0.92 || ctx.ticks.activityRatio >= 1.05 ||
+                              ctx.market.normalizedBarRangeAtr >= 0.95 || ctx.ind.relativeVolume >= 1.25);
       double effSlMult = GetEffectiveSlMult(ctx, 1.0);
       double effTpMult = GetEffectiveTpMult(ctx, 1.08);
 
-      bool bullMtfTailwind = (ctx.mtf.higherBias == SIGNAL_BUY) || (ctx.mtf.higherBias == SIGNAL_NONE && ctx.mtf.intermediateBias == SIGNAL_BUY);
-      bool bearMtfTailwind = (ctx.mtf.higherBias == SIGNAL_SELL) || (ctx.mtf.higherBias == SIGNAL_NONE && ctx.mtf.intermediateBias == SIGNAL_SELL);
+      bool bullMtfTailwind = (ctx.mtf.higherBias == SIGNAL_BUY) ||
+                             (ctx.mtf.higherBias == SIGNAL_NONE && ctx.mtf.intermediateBias == SIGNAL_BUY && ctx.ind.adxMain >= 22.0 && ctx.regime.efficiencyRatio >= 0.30);
+      bool bearMtfTailwind = (ctx.mtf.higherBias == SIGNAL_SELL) ||
+                             (ctx.mtf.higherBias == SIGNAL_NONE && ctx.mtf.intermediateBias == SIGNAL_SELL && ctx.ind.adxMain >= 22.0 && ctx.regime.efficiencyRatio >= 0.30);
       bool bullWallClear = !(ctx.structure.nearestResistance > ctx.market.close &&
-                             (ctx.structure.nearestResistance - ctx.market.close) < ctx.ind.atr * 0.75 &&
+                             (ctx.structure.nearestResistance - ctx.market.close) < ctx.ind.atr * 0.85 &&
                              ctx.structure.resistanceRejectCount >= 2);
       bool bearWallClear = !(ctx.structure.nearestSupport > 0.0 &&
                              ctx.structure.nearestSupport < ctx.market.close &&
-                             (ctx.market.close - ctx.structure.nearestSupport) < ctx.ind.atr * 0.75 &&
+                             (ctx.market.close - ctx.structure.nearestSupport) < ctx.ind.atr * 0.85 &&
                              ctx.structure.supportRejectCount >= 2);
 
-      // High-conviction breakout retest OR confirmed fresh breakout (Structure / Chart Pattern / Donchian)
+      // Fresh breakout from compression/range or clean structural retest (no outer-BB chasing!)
       bool bullRetest = (ctx.structure.lastEvent == STRUCT_RETEST_BULL && ctx.market.close > ctx.market.open &&
                          bullCloseConv && ctx.candle.bias != SIGNAL_SELL && ctx.ind.emaFast >= ctx.ind.emaMedium);
       bool bearRetest = (ctx.structure.lastEvent == STRUCT_RETEST_BEAR && ctx.market.close < ctx.market.open &&
                          bearCloseConv && ctx.candle.bias != SIGNAL_BUY && ctx.ind.emaFast <= ctx.ind.emaMedium);
       bool bullDonchianBreak = (ctx.ind.donchianHigh > 0.0 && ctx.market.close > ctx.ind.donchianHigh &&
-                                ctx.market.close > ctx.ind.bbUpper && ctx.ind.emaFast > ctx.ind.emaMedium);
+                                ctx.market.open <= ctx.ind.donchianHigh + ctx.ind.atr * 0.15 &&
+                                ctx.ind.emaFast > ctx.ind.emaMedium);
       bool bearDonchianBreak = (ctx.ind.donchianLow > 0.0 && ctx.market.close < ctx.ind.donchianLow &&
-                                ctx.market.close < ctx.ind.bbLower && ctx.ind.emaFast < ctx.ind.emaMedium);
+                                ctx.market.open >= ctx.ind.donchianLow - ctx.ind.atr * 0.15 &&
+                                ctx.ind.emaFast < ctx.ind.emaMedium);
 
-      bool bullMomOk = (ctx.market.close > ctx.market.open && bullCloseConv && ctx.ind.macdHist > 0.0 && ctx.ind.adxMain >= 16.0 && ctx.ind.emaFast > ctx.ind.emaMedium);
-      bool bearMomOk = (ctx.market.close < ctx.market.open && bearCloseConv && ctx.ind.macdHist < 0.0 && ctx.ind.adxMain >= 16.0 && ctx.ind.emaFast < ctx.ind.emaMedium);
+      bool bullMomOk = (ctx.market.close > ctx.market.open && bullCloseConv && ctx.ind.macdHist > 0.0 &&
+                        ctx.ind.adxMain >= 18.5 && ctx.ind.adxPlusDI > ctx.ind.adxMinusDI && ctx.ind.emaFast > ctx.ind.emaMedium);
+      bool bearMomOk = (ctx.market.close < ctx.market.open && bearCloseConv && ctx.ind.macdHist < 0.0 &&
+                        ctx.ind.adxMain >= 18.5 && ctx.ind.adxMinusDI > ctx.ind.adxPlusDI && ctx.ind.emaFast < ctx.ind.emaMedium);
 
       bool bullBreak = (bullMtfTailwind && bullWallClear) &&
                        (bullRetest ||
@@ -120,41 +125,65 @@ public:
                           (ctx.chartPattern.pattern != PATTERN_NONE && ctx.chartPattern.bias == SIGNAL_SELL && ctx.market.close < ctx.chartPattern.breakoutLevel)) &&
                          strongBody && activityConfirm && bearMomOk));
 
-      if(bullBreak && ctx.ind.rsi < 72.0)
+      if(bullBreak && ctx.ind.rsi < 69.0)
       {
-         double slDist = ComputeStructuralSLDist(ctx, SIGNAL_BUY, effSlMult, effSlMult * 1.40);
+         double slDist = ComputeStructuralSLDist(ctx, SIGNAL_BUY, effSlMult, effSlMult * 1.25);
+         if(!HasClearRoomToTarget(ctx, SIGNAL_BUY, slDist, true))
+         {
+            outRejectReason = "Breakout blocked directly below PDH or HTF swing ceiling";
+            return false;
+         }
          double tpMultEff = ctx.mtf.alignedBullish ? (effTpMult * 1.20) : effTpMult;
-         double tpDist = MathMax(slDist * 1.55, ctx.ind.atr * tpMultEff);
-         string desc = bullRetest ? "Bullish breakout retest confirmation" : "Confirmed bullish structural/Donchian breakout with displacement";
-         PopulateCommonSignal(outSignal, ctx, SIGNAL_BUY, slDist, tpDist, bullRetest ? 0.86 : 0.80, desc,
-                              StringFormat("BarRange=%.2fATR, VolR=%.2f, RVOL=%.2f, TickAct=%.2f",
-                                           ctx.market.normalizedBarRangeAtr, ctx.regime.volatilityRatio, ctx.ind.relativeVolume, ctx.ticks.activityRatio),
+         double tpDist = MathMax(slDist * 1.65, ctx.ind.atr * tpMultEff);
+         string desc = bullRetest ? "Bullish breakout retest confirmation" : "Confirmed fresh bullish structural/Donchian breakout with volume";
+         PopulateCommonSignal(outSignal, ctx, SIGNAL_BUY, slDist, tpDist, bullRetest ? 0.87 : 0.82, desc,
+                              StringFormat("BarRange=%.2fATR, VolR=%.2f, RVOL=%.2f, Ext=%.2fATR",
+                                           ctx.market.normalizedBarRangeAtr, ctx.regime.volatilityRatio, ctx.ind.relativeVolume, ctx.ind.emaDistanceAtr),
                               ctx.structure.summary, ctx.chartPattern.name,
                               ctx.mtf.hasStrongConflict ? ctx.mtf.conflictReason : "None");
+         if(!bullRetest && (ctx.market.close - ctx.ind.emaFast) >= ctx.ind.atr * 0.45)
+         {
+            double retestBase = (ctx.structure.rangeHigh > ctx.market.low && ctx.structure.rangeHigh < ctx.market.close)
+                                ? (ctx.structure.rangeHigh + ctx.ind.atr * 0.08)
+                                : (ctx.market.low + barRange * 0.40);
+            ComputeOptimalPullbackTrigger(outSignal, ctx, 0.22, retestBase);
+         }
          return true;
       }
 
-      if(bearBreak && ctx.ind.rsi > 26.0)
+      if(bearBreak && ctx.ind.rsi > 31.0)
       {
-         double slDist = ComputeStructuralSLDist(ctx, SIGNAL_SELL, effSlMult, effSlMult * 1.40);
+         double slDist = ComputeStructuralSLDist(ctx, SIGNAL_SELL, effSlMult, effSlMult * 1.25);
+         if(!HasClearRoomToTarget(ctx, SIGNAL_SELL, slDist, true))
+         {
+            outRejectReason = "Breakout blocked directly above PDL or HTF swing floor";
+            return false;
+         }
          double tpMultEff = ctx.mtf.alignedBearish ? (effTpMult * 1.20) : effTpMult;
-         double tpDist = MathMax(slDist * 1.55, ctx.ind.atr * tpMultEff);
-         string desc = bearRetest ? "Bearish breakout retest confirmation" : "Confirmed bearish structural/Donchian breakout with displacement";
-         PopulateCommonSignal(outSignal, ctx, SIGNAL_SELL, slDist, tpDist, bearRetest ? 0.86 : 0.80, desc,
-                              StringFormat("BarRange=%.2fATR, VolR=%.2f, RVOL=%.2f, TickAct=%.2f",
-                                           ctx.market.normalizedBarRangeAtr, ctx.regime.volatilityRatio, ctx.ind.relativeVolume, ctx.ticks.activityRatio),
+         double tpDist = MathMax(slDist * 1.65, ctx.ind.atr * tpMultEff);
+         string desc = bearRetest ? "Bearish breakout retest confirmation" : "Confirmed fresh bearish structural/Donchian breakout with volume";
+         PopulateCommonSignal(outSignal, ctx, SIGNAL_SELL, slDist, tpDist, bearRetest ? 0.87 : 0.82, desc,
+                              StringFormat("BarRange=%.2fATR, VolR=%.2f, RVOL=%.2f, Ext=%.2fATR",
+                                           ctx.market.normalizedBarRangeAtr, ctx.regime.volatilityRatio, ctx.ind.relativeVolume, ctx.ind.emaDistanceAtr),
                               ctx.structure.summary, ctx.chartPattern.name,
                               ctx.mtf.hasStrongConflict ? ctx.mtf.conflictReason : "None");
+         if(!bearRetest && (ctx.ind.emaFast - ctx.market.close) >= ctx.ind.atr * 0.45)
+         {
+            double retestBase = (ctx.structure.rangeLow > 0.0 && ctx.structure.rangeLow < ctx.market.high && ctx.structure.rangeLow > ctx.market.close)
+                                ? (ctx.structure.rangeLow - ctx.ind.atr * 0.08)
+                                : (ctx.market.high - barRange * 0.40);
+            ComputeOptimalPullbackTrigger(outSignal, ctx, 0.22, retestBase);
+         }
          return true;
       }
 
-      outRejectReason = "No confirmed breakout or retest with required displacement & HTF alignment";
+      outRejectReason = "No fresh breakout/retest with required RVOL, HTF tailwind & non-extended displacement";
       return false;
    }
 
    virtual bool ShouldExitPosition(const SManagedPosition &pos, const SAnalysisContext &ctx, string &outExitReason) const override
    {
-      if(pos.holdingSeconds < 180 || !ctx.structure.isReady) return false;
+      if(pos.holdingSeconds < 300 || !ctx.structure.isReady) return false;
       if(pos.direction == SIGNAL_BUY && ctx.structure.lastEvent == STRUCT_FAILED_BREAKOUT_UP)
       {
          outExitReason = "BreakoutScalping exit: failed upside breakout re-entered range";

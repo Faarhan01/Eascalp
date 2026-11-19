@@ -1,7 +1,7 @@
 //+------------------------------------------------------------------+
 //|                                             DashboardManager.mqh |
 //|                        Advanced Multi-Market MT5 Scalping EA     |
-//|                        v2.9.0 Strictly Read-Only Terminal        |
+//|                        v3.1.0 Strictly Read-Only Terminal        |
 //+------------------------------------------------------------------+
 #ifndef __ASEA_DASHBOARD_DASHBOARDMANAGER_MQH__
 #define __ASEA_DASHBOARD_DASHBOARDMANAGER_MQH__
@@ -81,13 +81,13 @@ private:
       int maxChars = MathMax(18, (g.colW - 165) / 7);
       string ccy = (s.accountCurrency != "") ? (" " + s.accountCurrency) : "";
       int y = g.contentY + 30;
-      DrawRow("ov1", g.colLeftX + 10, y, "Asset / Acct:", StringFormat("%s (%s)", AssetClassToString(s.symbolProfile.assetClass), s.symbolProfile.isHedgingAccount ? "Hedging" : "Netting")); y += g.rowStep;
+      DrawRow("ov1", g.colLeftX + 10, y, "Asset / DNA:", StringFormat("%s (%s)", AssetClassToString(s.symbolProfile.assetClass), SymbolPersonalityToString(s.symbolProfile.symbolPersonality))); y += g.rowStep;
       DrawRow("ov2", g.colLeftX + 10, y, "Monitored Syms:", CDashboardStatistics::Truncate(s.monitoredSymbolsSummary, maxChars)); y += g.rowStep;
       DrawRow("ov3", g.colLeftX + 10, y, "Lot Min/Max/Step:", StringFormat("%.2f / %.1f / %.2f", s.symbolProfile.volumeMin, s.symbolProfile.volumeMax, s.symbolProfile.volumeStep)); y += g.rowStep;
       DrawRow("ov4", g.colLeftX + 10, y, "Stops / EstComm:", StringFormat("%d pts / %.2f%s", s.symbolProfile.stopsLevelPoints, s.symbolProfile.estCommissionPerLot, ccy)); y += g.rowStep;
       DrawRow("ov5", g.colLeftX + 10, y, "Data / Bars:", StringFormat("%s (%d bars)", s.market.dataReady ? "Ready" : "Waiting", s.symbolProfile.availableBarsPrimary), s.market.dataReady ? ASEA_CLR_GREEN : ASEA_CLR_AMBER); y += g.rowStep;
       DrawRow("ov6", g.colLeftX + 10, y, "Active Strategy:", CDashboardStatistics::Truncate(s.activeStrategyName, maxChars)); y += g.rowStep;
-      DrawRow("ov7", g.colLeftX + 10, y, "Market Regime:", CDashboardStatistics::Truncate(s.regime.label, maxChars)); y += g.rowStep;
+      DrawRow("ov7", g.colLeftX + 10, y, "Entry Sniper:", s.sniperActive ? StringFormat("ARMED %s @ %s (%db)", DirectionToString(s.sniperDirection), DoubleToString(s.sniperTargetPrice, s.symbolProfile.digits), s.sniperBarsLeft) : s.sniperStatus, s.sniperActive ? ASEA_CLR_ACCENT : ASEA_CLR_TEXT_PRIMARY); y += g.rowStep;
       DrawRow("ov8", g.colLeftX + 10, y, "Net Expectancy:", s.lastSignal.isValid ? StringFormat("%+.2f%s (R:R %.2f)", s.lastSignal.expectancy.netExpectancyMoney, ccy, s.lastSignal.expectancy.riskRewardRatio) : "N/A"); y += g.rowStep;
       DrawRow("ov9", g.colLeftX + 10, y, "Last Analysis:", TimeToString(s.lastAnalysisTime, TIME_SECONDS));
 
@@ -118,9 +118,10 @@ private:
       DrawRow("mk3", g.colLeftX + 10, y, "ATR / VolPctile:", StringFormat("%s (%.0f%%ile)", DoubleToString(s.indicators.atr, d), s.indicators.volatilityPercentile)); y += g.rowStep;
       DrawRow("mk4", g.colLeftX + 10, y, "RSI / ADX / RVOL:", StringFormat("%.1f / %.1f / %.2fx", s.indicators.rsi, s.indicators.adxMain, s.indicators.relativeVolume)); y += g.rowStep;
       DrawRow("mk5", g.colLeftX + 10, y, "Tick Vel / Edge:", StringFormat("%.1f pts/s (%s)", s.ticks.priceVelocity, s.ticks.tickProvidesNetEdge ? "NetEdge+" : "NoEdge")); y += g.rowStep;
-      DrawRow("mk6", g.colLeftX + 10, y, "Structure:", CDashboardStatistics::Truncate(s.structure.summary, maxChars)); y += g.rowStep;
+      string zoneLabel = s.structure.isDiscountZone ? "Discount" : (s.structure.isPremiumZone ? "Premium" : "Equilibrium");
+      DrawRow("mk6", g.colLeftX + 10, y, "Swing / Zone:", StringFormat("%.0f%% (%s) | VZ=%.1f", s.structure.swingRangePos01 * 100.0, zoneLabel, s.indicators.vwapZScore)); y += g.rowStep;
       DrawRow("mk7", g.colLeftX + 10, y, "Sup / Res (Rej):", StringFormat("%s(%d) / %s(%d)", DoubleToString(s.structure.nearestSupport, d), s.structure.supportRejectCount, DoubleToString(s.structure.nearestResistance, d), s.structure.resistanceRejectCount)); y += g.rowStep;
-      DrawRow("mk8", g.colLeftX + 10, y, "Candle / Pattern:", CDashboardStatistics::Truncate(s.candle.name + " / " + s.chartPattern.name, maxChars)); y += g.rowStep;
+      DrawRow("mk8", g.colLeftX + 10, y, "Symbol DNA:", CDashboardStatistics::Truncate(s.symbolProfile.microstructureSummary, maxChars)); y += g.rowStep;
       DrawRow("mk9", g.colLeftX + 10, y, "MTF Weighted:", StringFormat("%+.0f (%s)", s.mtf.weightedScore, s.mtf.hasStrongConflict ? "Conflict" : "Aligned"), s.mtf.hasStrongConflict ? ASEA_CLR_AMBER : ASEA_CLR_GREEN);
 
       CDashboardPrimitives::DrawLabel(m_chartId, "BODY_H2", g.colRightX + 10, g.contentY + 8, "Latest Signal & Cost Evaluation", ASEA_CLR_ACCENT, 9, "Segoe UI");
@@ -131,7 +132,7 @@ private:
       DrawRow("sg4", g.colRightX + 10, y, "Validation:", s.lastValidation.rejectionCode, s.lastValidation.passed ? ASEA_CLR_GREEN : ASEA_CLR_AMBER); y += g.rowStep;
       DrawRow("sg5", g.colRightX + 10, y, "Reg/Str/Trd/Mom:", StringFormat("%.0f/%.0f/%.0f/%.0f", s.lastSignal.breakdown.regimeScore, s.lastSignal.breakdown.structureScore, s.lastSignal.breakdown.trendStrengthScore, s.lastSignal.breakdown.momentumScore)); y += g.rowStep;
       DrawRow("sg6", g.colRightX + 10, y, "MTF/Tick/Cost:", StringFormat("%.0f/%.0f/%.0f", s.lastSignal.breakdown.mtfAgreementScore, s.lastSignal.breakdown.tickEdgeScore, s.lastSignal.breakdown.executionCostScore)); y += g.rowStep;
-      DrawRow("sg7", g.colRightX + 10, y, "Cost / NetExp:", StringFormat("%.2f / %+.2f", s.lastSignal.expectancy.estimatedCostMoney, s.lastSignal.expectancy.netExpectancyMoney)); y += g.rowStep;
+      DrawRow("sg7", g.colRightX + 10, y, "Sniper Trigger:", s.sniperActive ? StringFormat("%s @ %s (%d left)", DirectionToString(s.sniperDirection), DoubleToString(s.sniperTargetPrice, d), s.sniperBarsLeft) : s.sniperStatus); y += g.rowStep;
       DrawRow("sg8", g.colRightX + 10, y, "Reason:", CDashboardStatistics::Truncate(s.lastValidation.rejectionReason, maxChars));
    }
 

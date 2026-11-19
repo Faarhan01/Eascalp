@@ -1,7 +1,7 @@
 //+------------------------------------------------------------------+
 //|                                                SymbolContext.mqh |
 //|                        Advanced Multi-Market MT5 Scalping EA     |
-//|                        v2.9.0 Isolated Per-Symbol Analysis Unit  |
+//|                        v3.1.0 Isolated Per-Symbol Analysis Unit  |
 //+------------------------------------------------------------------+
 #ifndef __ASEA_CORE_SYMBOLCONTEXT_MQH__
 #define __ASEA_CORE_SYMBOLCONTEXT_MQH__
@@ -126,9 +126,9 @@ public:
       m_candles.Configure(dojiBodyMax, pinWickMin);
       m_patterns.Configure(patternLookback, swingStrength, patternTolAtr);
 
-      // Seed empirical microstructure & Step Index detection immediately if bars are already cached
+      // Seed empirical microstructure, Symbol DNA personality & 24h liquidity profile immediately if bars are already cached
       MqlRates initRates[];
-      if(m_marketData.CopyAvailableClosedRates(m_primaryTF, 20, 50, initRates))
+      if(m_marketData.CopyAvailableClosedRates(m_primaryTF, 30, 240, initRates))
       {
          int nInit = ArraySize(initRates);
          double trSum = 0.0;
@@ -146,7 +146,7 @@ public:
             m_lastAtr = initAtr;
             SMarketSnapshot initSnap = m_marketData.GetSnapshot();
             m_symIntel.UpdateDynamicBaselines(initAtr, initSnap.avgSpreadPoints);
-            m_symIntel.CalibrateFromHistory(initRates, nInit, initAtr);
+            m_symIntel.CalibrateFromHistory(initRates, nInit, initAtr, m_primaryTF);
             if(m_autoAdaptBySymbol)
             {
                SAdaptiveAssetProfile apCal = m_symIntel.GetAdaptiveAssetProfile();
@@ -206,10 +206,10 @@ public:
             if(!m_symIntel.IsEmpiricalProfileReady() || m_histCalibBarsSince >= 20)
             {
                MqlRates histRates[];
-               if(m_marketData.CopyAvailableClosedRates(m_primaryTF, 20, 50, histRates))
+               if(m_marketData.CopyAvailableClosedRates(m_primaryTF, 30, 240, histRates))
                {
                   bool prevStep = m_symIntel.IsStepIndex();
-                  m_symIntel.CalibrateFromHistory(histRates, ArraySize(histRates), ind.atr);
+                  m_symIntel.CalibrateFromHistory(histRates, ArraySize(histRates), ind.atr, m_primaryTF);
                   m_histCalibBarsSince = 0;
                   if(m_autoAdaptBySymbol && (prevStep != m_symIntel.IsStepIndex() || m_symIntel.IsEmpiricalProfileReady()))
                   {

@@ -1,7 +1,7 @@
 //+------------------------------------------------------------------+
 //|                                                 MarketRegime.mqh |
 //|                        Advanced Multi-Market MT5 Scalping EA     |
-//|                        v2.9.0 18-State Regime & Transition Engine|
+//|                        v3.1.0 18-State Regime & Transition Engine|
 //+------------------------------------------------------------------+
 #ifndef __ASEA_MARKET_MARKETREGIME_MQH__
 #define __ASEA_MARKET_MARKETREGIME_MQH__
@@ -170,12 +170,12 @@ public:
                   m_barState.regime = REGIME_EARLY_TREND_BEAR;
                   m_barState.isTrending = true; m_barState.confidence = 0.74;
                }
-               else if((bullStack || structure.structureBias > 0) && ind.adxPlusDI >= ind.adxMinusDI)
+               else if((bullStack || (structure.structureBias > 0 && ind.emaMedium > ind.emaSlow)) && ind.adxPlusDI >= ind.adxMinusDI + 1.5)
                {
                   m_barState.regime = REGIME_WEAK_BULL_TREND;
                   m_barState.isTrending = true; m_barState.confidence = 0.68;
                }
-               else if((bearStack || structure.structureBias < 0) && ind.adxMinusDI >= ind.adxPlusDI)
+               else if((bearStack || (structure.structureBias < 0 && ind.emaMedium < ind.emaSlow)) && ind.adxMinusDI >= ind.adxPlusDI + 1.5)
                {
                   m_barState.regime = REGIME_WEAK_BEAR_TREND;
                   m_barState.isTrending = true; m_barState.confidence = 0.68;

@@ -1,7 +1,7 @@
 //+------------------------------------------------------------------+
 //|                                                 EAController.mqh |
 //|                        Advanced Multi-Market MT5 Scalping EA     |
-//|                        v2.9.0 Multi-Symbol Orchestrator          |
+//|                        v3.1.0 Multi-Symbol Sniper Orchestrator   |
 //+------------------------------------------------------------------+
 #ifndef __ASEA_CORE_EACONTROLLER_MQH__
 #define __ASEA_CORE_EACONTROLLER_MQH__
@@ -89,6 +89,9 @@ struct SEAConfig
    bool   snapTpBeforeMajorWalls;
    double minBreakoutRvol;
    bool   evaluateOnNewBarOnly;
+   bool   enableExtremumEntrySniper;
+   int    extremumSniperWaitBars;
+   double extremumPullbackMinAtr;
 
    SExpectancyConfig expCfg;
    SValidationConfig valCfg;
@@ -121,7 +124,7 @@ struct SEAConfig
       allowLiveTrading = true;
       confirmLiveRiskAck = true;
       magicNumber = 510299;
-      configLabel = "AutoAdaptive_v2.9";
+      configLabel = "AutoAdaptive_v3.1";
       autoAdaptBySymbol = true;
       assetClassOverride = ASSET_OVERRIDE_AUTO;
       autoTuneFromHistory = true;
@@ -142,10 +145,10 @@ struct SEAConfig
       structureLookback = 120;
       zoneAtrMult = 0.35;
       adxStrongThresh = 26.0;
-      adxWeakThresh = 17.0;
+      adxWeakThresh = 18.0;
       volHighRatio = 1.45;
       volLowRatio = 0.70;
-      spreadUnstableRatio = 2.80;
+      spreadUnstableRatio = 2.60;
       dojiBodyMaxRatio = 0.12;
       pinWickMinRatio = 2.0;
       patternLookback = 100;
@@ -156,28 +159,31 @@ struct SEAConfig
       enableReversalScalp = true;
       enableRangeScalp = true;
       enableVolExpansion = true;
-      enableMicroMomentum = true;
+      enableMicroMomentum = false;
       enableLiquiditySweep = true;
       enableVwapReversion = true;
       enableEmaRibbon = true;
-      defaultSlAtrMult = 1.60;
-      defaultTpAtrMult = 2.80;
+      defaultSlAtrMult = 1.65;
+      defaultTpAtrMult = 3.20;
       snapTpBeforeMajorWalls = true;
-      minBreakoutRvol = 0.72;
+      minBreakoutRvol = 1.10;
       evaluateOnNewBarOnly = true;
+      enableExtremumEntrySniper = true;
+      extremumSniperWaitBars = 2;
+      extremumPullbackMinAtr = 0.20;
       expCfg.ResetDefaults();
       valCfg.ResetDefaults();
       riskCfg.ResetDefaults();
       maxSlippagePoints = 25;
       maxOrderRetries = 2;
       posCfg.ResetDefaults();
-      lossCooldownBars = 3;
-      maxTradesPerHour = 3;
-      maxDailyTrades = 12;
+      lossCooldownBars = 4;
+      maxTradesPerHour = 2;
+      maxDailyTrades = 8;
       autoSelectBestStrategy = false;
-      minStrategySampleSize = 20;
+      minStrategySampleSize = 15;
       enableAdaptiveEvaluation = true;
-      deteriorationPfFloor = 0.85;
+      deteriorationPfFloor = 0.92;
       walkForwardDays = 14;
       oosSplitRatio = 0.30;
       enableCSVExports = true;
@@ -197,6 +203,34 @@ struct SPendingEntryCandidate
    datetime           tickTime;
    ENUM_MARKET_REGIME regime;
    bool               sameBarRej;
+};
+
+struct SArmedEntrySniper
+{
+   bool               active;
+   int                ctxIdx;
+   string             sym;
+   STradeSignal       sig;
+   double             targetPrice;
+   double             maxChasePrice;
+   datetime           armedBarTime;
+   int                barsElapsed;
+   ENUM_MARKET_REGIME regime;
+   string             statusText;
+
+   void Reset(const string status = "Scanning")
+   {
+      active = false;
+      ctxIdx = -1;
+      sym = "";
+      sig.Reset();
+      targetPrice = 0.0;
+      maxChasePrice = 0.0;
+      armedBarTime = 0;
+      barsElapsed = 0;
+      regime = REGIME_UNKNOWN;
+      statusText = status;
+   }
 };
 
 class CEAController
@@ -258,6 +292,7 @@ private:
    int                  m_lastRejStrat[EA_MAX_SYMBOLS];
    int                  m_lastRejDir[EA_MAX_SYMBOLS];
    string               m_lastRejCode[EA_MAX_SYMBOLS];
+   SArmedEntrySniper    m_snipers[EA_MAX_SYMBOLS];
 
    datetime             m_execTimes[64];
    int                  m_execTimeCount;
@@ -569,6 +604,7 @@ public:
          m_lastRejStrat[c] = -1;
          m_lastRejDir[c] = (int)SIGNAL_NONE;
          m_lastRejCode[c] = "";
+         m_snipers[c].Reset();
       }
 
       m_execTimeCount = 0;
@@ -590,6 +626,8 @@ public:
    bool Initialize(const SEAConfig &cfg)
    {
       m_cfg = cfg;
+      m_cfg.extremumSniperWaitBars = MathMax(0, MathMin(6, m_cfg.extremumSniperWaitBars));
+      m_cfg.extremumPullbackMinAtr = MathMax(0.05, MathMin(1.0, m_cfg.extremumPullbackMinAtr));
       m_isTester = (MQLInfoInteger(MQL_TESTER) != 0);
       m_isVisualTester = (MQLInfoInteger(MQL_VISUAL_MODE) != 0);
       m_primarySymbol = (m_cfg.symbolOverride != "") ? m_cfg.symbolOverride : _Symbol;
@@ -668,16 +706,16 @@ public:
          return false;
       }
 
-      m_stratPullback.Configure(m_cfg.enableTrendPullback, m_cfg.defaultSlAtrMult, m_cfg.defaultTpAtrMult, m_cfg.minStrategySampleSize, 18.0, 0.70);
-      m_stratMomentum.Configure(m_cfg.enableMomentumScalp, m_cfg.defaultSlAtrMult, m_cfg.defaultTpAtrMult, m_cfg.minStrategySampleSize, 0.015);
-      m_stratBreakout.Configure(m_cfg.enableBreakoutScalp, m_cfg.defaultSlAtrMult, m_cfg.defaultTpAtrMult * 1.05, m_cfg.minStrategySampleSize, 0.35, m_cfg.minBreakoutRvol);
-      m_stratReversal.Configure(m_cfg.enableReversalScalp, m_cfg.defaultSlAtrMult, m_cfg.defaultTpAtrMult, m_cfg.minStrategySampleSize, 32.0, 68.0);
-      m_stratRange.Configure(m_cfg.enableRangeScalp, m_cfg.defaultSlAtrMult * 0.95, m_cfg.defaultTpAtrMult * 0.88, m_cfg.minStrategySampleSize, 22.0);
-      m_stratVolExp.Configure(m_cfg.enableVolExpansion, m_cfg.defaultSlAtrMult * 1.08, m_cfg.defaultTpAtrMult * 1.15, m_cfg.minStrategySampleSize, 1.15, MathMax(0.75, m_cfg.minBreakoutRvol * 1.10));
-      m_stratMicro.Configure(m_cfg.enableMicroMomentum, m_cfg.defaultSlAtrMult, m_cfg.defaultTpAtrMult * 0.95, m_cfg.minStrategySampleSize, 5, 1.0, 20.0);
-      m_stratLiqSweep.Configure(m_cfg.enableLiquiditySweep, m_cfg.defaultSlAtrMult, m_cfg.defaultTpAtrMult * 1.05, m_cfg.minStrategySampleSize, 0.38);
-      m_stratVwapRev.Configure(m_cfg.enableVwapReversion, m_cfg.defaultSlAtrMult * 0.95, m_cfg.defaultTpAtrMult * 0.92, m_cfg.minStrategySampleSize, 1.45);
-      m_stratEmaRibbon.Configure(m_cfg.enableEmaRibbon, m_cfg.defaultSlAtrMult, m_cfg.defaultTpAtrMult * 1.12, m_cfg.minStrategySampleSize, 20.0, 46.0, MathMax(0.75, m_cfg.minBreakoutRvol * 1.10));
+      m_stratPullback.Configure(m_cfg.enableTrendPullback, m_cfg.defaultSlAtrMult, m_cfg.defaultTpAtrMult, m_cfg.minStrategySampleSize, 20.0, 0.50);
+      m_stratMomentum.Configure(m_cfg.enableMomentumScalp, m_cfg.defaultSlAtrMult, m_cfg.defaultTpAtrMult, m_cfg.minStrategySampleSize, 0.012);
+      m_stratBreakout.Configure(m_cfg.enableBreakoutScalp, m_cfg.defaultSlAtrMult, m_cfg.defaultTpAtrMult * 1.05, m_cfg.minStrategySampleSize, 0.40, m_cfg.minBreakoutRvol);
+      m_stratReversal.Configure(m_cfg.enableReversalScalp, m_cfg.defaultSlAtrMult, m_cfg.defaultTpAtrMult, m_cfg.minStrategySampleSize, 30.0, 70.0);
+      m_stratRange.Configure(m_cfg.enableRangeScalp, m_cfg.defaultSlAtrMult * 0.95, m_cfg.defaultTpAtrMult * 0.90, m_cfg.minStrategySampleSize, 22.0);
+      m_stratVolExp.Configure(m_cfg.enableVolExpansion, m_cfg.defaultSlAtrMult * 1.08, m_cfg.defaultTpAtrMult * 1.15, m_cfg.minStrategySampleSize, 1.15, MathMax(1.15, m_cfg.minBreakoutRvol));
+      m_stratMicro.Configure(m_cfg.enableMicroMomentum, m_cfg.defaultSlAtrMult, m_cfg.defaultTpAtrMult, m_cfg.minStrategySampleSize, 7, 1.2, 12.0);
+      m_stratLiqSweep.Configure(m_cfg.enableLiquiditySweep, m_cfg.defaultSlAtrMult * 0.92, m_cfg.defaultTpAtrMult * 1.05, m_cfg.minStrategySampleSize, 0.44);
+      m_stratVwapRev.Configure(m_cfg.enableVwapReversion, m_cfg.defaultSlAtrMult * 0.95, m_cfg.defaultTpAtrMult * 0.95, m_cfg.minStrategySampleSize, 1.60);
+      m_stratEmaRibbon.Configure(m_cfg.enableEmaRibbon, m_cfg.defaultSlAtrMult, m_cfg.defaultTpAtrMult * 1.12, m_cfg.minStrategySampleSize, 21.0, 46.0, MathMax(1.00, m_cfg.minBreakoutRvol));
       for(int i = 0; i < EA_MAX_STRATEGIES; i++)
       {
          if(m_strategies[i] != NULL)
@@ -709,6 +747,7 @@ public:
          m_lastRejStrat[c] = -1;
          m_lastRejDir[c] = (int)SIGNAL_NONE;
          m_lastRejCode[c] = "";
+         m_snipers[c].Reset();
       }
 
       SPersistedState restored;
@@ -824,8 +863,9 @@ public:
          bool evalBarStrats = (indReady && (isNewBar || m_lastClosedStratBar[sIdxSym] != curBarT));
          bool evalMicro = evalBarStrats || (!m_cfg.evaluateOnNewBarOnly && indReady && m_contexts[sIdxSym].IsTicksReady() &&
                                             ((tickNow - m_lastMicroEvalTime[sIdxSym]) >= 2 || m_contexts[sIdxSym].IsTickSurge()));
+         bool hasArmedSniper = m_snipers[sIdxSym].active;
 
-         if(!hasSymPos && !isNewBar && !evalBarStrats && !evalMicro)
+         if(!hasSymPos && !hasArmedSniper && !isNewBar && !evalBarStrats && !evalMicro)
          {
             // Idle intra-bar tick on flat symbol: keep 1 Hz risk heartbeat on primary symbol and skip heavy context copy
             if(sIdxSym == 0 && (tickNow - m_lastRiskUpdateTime) >= 1)
@@ -877,9 +917,117 @@ public:
          }
 
          bool inCooldown = (GetCooldownBars(sym) > 0);
+         bool sniperTriggeredThisTick = false;
+
+         // Disarm sniper if position opened, symbol enters cooldown, or market becomes unstable
+         if(m_snipers[sIdxSym].active && (hasSymPos || inCooldown || ctx.regime.isUnstable))
+         {
+            m_snipers[sIdxSym].Reset("Disarmed");
+            decisionUpdated = true;
+         }
+
+         // Manage armed pullback/extremum entry sniper on live ticks
+         if(!hasSymPos && !inCooldown && m_snipers[sIdxSym].active)
+         {
+            if(isNewBar && ctx.market.barTime != m_snipers[sIdxSym].armedBarTime)
+               m_snipers[sIdxSym].barsElapsed++;
+
+            if(m_snipers[sIdxSym].barsElapsed > m_cfg.extremumSniperWaitBars)
+            {
+               m_snipers[sIdxSym].Reset("Expired");
+               decisionUpdated = true;
+            }
+            else if(!m_execution.IsDuplicateBarExecution(sym, ctx.market.barTime))
+            {
+               MqlTick sniperTick;
+               if(SymbolInfoTick(sym, sniperTick) && sniperTick.bid > 0.0 && sniperTick.ask > 0.0)
+               {
+                  ENUM_SIGNAL_DIRECTION sDir = m_snipers[sIdxSym].sig.direction;
+                  bool slHitOrRunaway = false;
+                  if(sDir == SIGNAL_BUY)
+                     slHitOrRunaway = (sniperTick.bid <= m_snipers[sIdxSym].sig.stopLoss || sniperTick.ask > m_snipers[sIdxSym].maxChasePrice);
+                  else if(sDir == SIGNAL_SELL)
+                     slHitOrRunaway = (sniperTick.ask >= m_snipers[sIdxSym].sig.stopLoss || sniperTick.bid < m_snipers[sIdxSym].maxChasePrice);
+
+                  if(slHitOrRunaway)
+                  {
+                     m_snipers[sIdxSym].Reset("Invalidated");
+                     decisionUpdated = true;
+                  }
+                  else
+                  {
+                     bool hitPullback = (sDir == SIGNAL_BUY && sniperTick.ask <= m_snipers[sIdxSym].targetPrice) ||
+                                        (sDir == SIGNAL_SELL && sniperTick.bid >= m_snipers[sIdxSym].targetPrice);
+                     if(hitPullback)
+                     {
+                        string sCapCode = "", sCapReason = "";
+                        if(!CheckFrequencyCaps(tickNow, sCapCode, sCapReason))
+                        {
+                           m_snipers[sIdxSym].Reset("FreqCap");
+                           decisionUpdated = true;
+                        }
+                        else
+                        {
+                           STradeSignal trigSig = m_snipers[sIdxSym].sig;
+                           trigSig.entryPrice = (sDir == SIGNAL_BUY) ? sniperTick.ask : sniperTick.bid;
+                           trigSig.timestamp  = tickNow;
+
+                           SRiskStatus rkS = m_risk.GetStatus();
+                           string sVolReason = "";
+                           double sLots = m_risk.CalculateFixedFractionalVolume(trigSig, *(m_contexts[sIdxSym].GetSymbolIntelPtr()), sVolReason,
+                                                                                ctx.regime.volatilityState, ctx.regime.volatilityRatio);
+                           int tsId = (int)trigSig.strategyId;
+                           SStrategyStats sStStats = (tsId >= 0 && tsId < EA_MAX_STRATEGIES) ? m_strategies[tsId].GetStats() : m_strategies[0].GetStats();
+                           double sEvalLots = (sLots > 0.0) ? sLots : ctx.symbolProfile.volumeMin;
+                           m_expectancy.Evaluate(trigSig, ctx.market, *(m_contexts[sIdxSym].GetSymbolIntelPtr()), sStStats, sEvalLots, m_cfg.autoAdaptBySymbol);
+
+                           bool sExecEn = (m_cfg.operatingMode == EA_MODE_DEMO_EXECUTION || m_cfg.operatingMode == EA_MODE_LIVE_TRADING);
+                           SValidationResult sValRes = m_validation.Validate(trigSig, ctx.symbolProfile, ctx.market, ctx.ind,
+                                                                             ctx.regime, ctx.mtf, rkS,
+                                                                             *(m_contexts[sIdxSym].GetSymbolIntelPtr()), sLots, sExecEn,
+                                                                             m_cfg.autoAdaptBySymbol);
+
+                           m_contexts[sIdxSym].SetLastDecision(trigSig, sValRes);
+                           decisionUpdated = true;
+                           if(sIdxSym == 0)
+                           {
+                              m_lastBestSignal = trigSig;
+                              m_lastValidation = sValRes;
+                           }
+
+                           if(sValRes.passed)
+                           {
+                              if(pendingCount < EA_MAX_SYMBOLS)
+                              {
+                                 pendingCands[pendingCount].ctxIdx     = sIdxSym;
+                                 pendingCands[pendingCount].sig        = trigSig;
+                                 pendingCands[pendingCount].lots       = sLots;
+                                 pendingCands[pendingCount].barTime    = ctx.market.barTime;
+                                 pendingCands[pendingCount].tickTime   = tickNow;
+                                 pendingCands[pendingCount].regime     = m_snipers[sIdxSym].regime;
+                                 pendingCands[pendingCount].sameBarRej = false;
+                                 pendingCount++;
+                              }
+                              m_snipers[sIdxSym].Reset("Triggered");
+                              sniperTriggeredThisTick = true;
+                           }
+                           else
+                           {
+                              bool transientRej = (sValRes.rejectionCode == "SPREAD_TOO_WIDE" ||
+                                                   sValRes.rejectionCode == "SPREAD_SPIKE" ||
+                                                   sValRes.rejectionCode == "SPREAD_TO_ATR_HIGH");
+                              if(!transientRej)
+                                 m_snipers[sIdxSym].Reset("Blocked");
+                           }
+                        }
+                     }
+                  }
+               }
+            }
+         }
 
          // Evaluate strategies for this symbol (9 closed-bar strategies run once per bar; MicroMomentum runs throttled intra-bar)
-         if(!inCooldown && (evalBarStrats || evalMicro) && !m_execution.IsDuplicateBarExecution(sym, ctx.market.barTime))
+         if(!sniperTriggeredThisTick && !inCooldown && (evalBarStrats || evalMicro) && !m_execution.IsDuplicateBarExecution(sym, ctx.market.barTime))
          {
             if(evalBarStrats)
                m_lastClosedStratBar[sIdxSym] = ctx.market.barTime;
@@ -887,7 +1035,7 @@ public:
                m_lastMicroEvalTime[sIdxSym] = tickNow;
 
             int bestStratIdx = -1;
-            m_selector.EvaluateAll(m_strategies, EA_MAX_STRATEGIES, ctx.regime, bestStratIdx);
+            m_selector.EvaluateAll(m_strategies, EA_MAX_STRATEGIES, ctx.regime, bestStratIdx, ctx.symbolProfile.symbolPersonality);
 
             STradeSignal bestBuy, bestSell;
             bestBuy.Reset();
@@ -1001,6 +1149,19 @@ public:
                                     prevCode == "SPREAD_TO_ATR_HIGH" || prevCode == "LIVE_PRICE_EXTENDED" ||
                                     prevCode == "LIVE_PRICE_PAST_SL" ||
                                     (prevCode == "LOW_SIGNAL_SCORE" && topSignal.compositeScore >= effMinScore));
+               }
+
+               if(allowCandidate && m_snipers[sIdxSym].active)
+               {
+                  // Do not supersede an armed pullback sniper on the same bar unless a strong opposite signal arrives
+                  if(topSignal.direction != m_snipers[sIdxSym].sig.direction && topSignal.compositeScore >= effMinScore)
+                     m_snipers[sIdxSym].Reset("Replaced");
+                  else if(topSignal.direction == m_snipers[sIdxSym].sig.direction &&
+                          !topSignal.requiresPullbackWait &&
+                          topSignal.compositeScore >= m_snipers[sIdxSym].sig.compositeScore + 3.0)
+                     m_snipers[sIdxSym].Reset("Upgraded");
+                  else
+                     allowCandidate = false;
                }
 
                if(allowCandidate)
@@ -1149,7 +1310,54 @@ public:
 
                   if(valRes.passed)
                   {
-                     if(pendingCount < EA_MAX_SYMBOLS)
+                     double sniperAtr = (ctx.ind.isReady && ctx.ind.atr > 0.0) ? ctx.ind.atr : (ctx.market.spreadPoints * ctx.symbolProfile.point * 6.0);
+                     bool alreadyAtOpt = (topSignal.optimalEntryPrice <= 0.0) ||
+                                         (topSignal.direction == SIGNAL_BUY && topSignal.entryPrice <= topSignal.optimalEntryPrice) ||
+                                         (topSignal.direction == SIGNAL_SELL && topSignal.entryPrice >= topSignal.optimalEntryPrice);
+                     double improveDist = (topSignal.optimalEntryPrice > 0.0) ? MathAbs(topSignal.entryPrice - topSignal.optimalEntryPrice) : 0.0;
+                     bool optSafeSideOfSl = (topSignal.direction == SIGNAL_BUY && topSignal.optimalEntryPrice > topSignal.stopLoss) ||
+                                            (topSignal.direction == SIGNAL_SELL && topSignal.optimalEntryPrice < topSignal.stopLoss);
+
+                     bool armSniper = (m_cfg.enableExtremumEntrySniper && m_cfg.extremumSniperWaitBars > 0 &&
+                                       !hasSymPos && !m_snipers[sIdxSym].active &&
+                                       topSignal.requiresPullbackWait && topSignal.optimalEntryPrice > 0.0 &&
+                                       !alreadyAtOpt && optSafeSideOfSl &&
+                                       sniperAtr > 0.0 && improveDist >= sniperAtr * m_cfg.extremumPullbackMinAtr);
+
+                     if(armSniper)
+                     {
+                        double normTarget = m_contexts[sIdxSym].GetSymbolIntelPtr().NormalizePrice(topSignal.optimalEntryPrice);
+                        m_snipers[sIdxSym].active        = true;
+                        m_snipers[sIdxSym].ctxIdx        = sIdxSym;
+                        m_snipers[sIdxSym].sym           = sym;
+                        m_snipers[sIdxSym].sig           = topSignal;
+                        m_snipers[sIdxSym].targetPrice   = (normTarget > 0.0) ? normTarget : topSignal.optimalEntryPrice;
+                        m_snipers[sIdxSym].maxChasePrice = (topSignal.direction == SIGNAL_BUY)
+                                                           ? (topSignal.entryPrice + sniperAtr * 0.85)
+                                                           : (topSignal.entryPrice - sniperAtr * 0.85);
+                        m_snipers[sIdxSym].armedBarTime  = ctx.market.barTime;
+                        m_snipers[sIdxSym].barsElapsed   = 0;
+                        m_snipers[sIdxSym].regime        = ctx.regime.regime;
+                        m_snipers[sIdxSym].statusText    = "Armed";
+
+                        SValidationResult armRes;
+                        armRes.Reset();
+                        armRes.rejectionCode   = "SNIPER_ARMED_WAIT";
+                        armRes.rejectionReason = StringFormat("Armed pullback sniper for %s @ %.*f (wait %d bars).",
+                                                              DirectionToString(topSignal.direction),
+                                                              ctx.symbolProfile.digits,
+                                                              m_snipers[sIdxSym].targetPrice,
+                                                              m_cfg.extremumSniperWaitBars);
+                        m_contexts[sIdxSym].SetLastDecision(topSignal, armRes);
+                        if(sIdxSym == 0)
+                        {
+                           m_lastBestSignal = topSignal;
+                           m_lastValidation = armRes;
+                        }
+                        if(m_diag.IsLevelEnabled(LOG_INFO))
+                           m_diag.Log(LOG_INFO, "EntrySniper", sym + " " + armRes.rejectionReason, "sniper_" + sym, 30);
+                     }
+                     else if(pendingCount < EA_MAX_SYMBOLS)
                      {
                         pendingCands[pendingCount].ctxIdx = sIdxSym;
                         pendingCands[pendingCount].sig = topSignal;
@@ -1393,6 +1601,11 @@ public:
       m_snapshot.operationalStatus       = m_risk.GetStatus().lockoutActive ? "Risk Lockout Active" :
                                            (m_cfg.operatingMode == EA_MODE_RESEARCH_ONLY ? "Research Observing" : "Active");
       m_snapshot.activeStrategyName      = m_lastBestSignal.isValid ? m_lastBestSignal.strategyName : "Scanning (10 Strategies)";
+      m_snapshot.sniperActive            = m_snipers[0].active;
+      m_snapshot.sniperStatus            = m_snipers[0].active ? "Armed" : m_snipers[0].statusText;
+      m_snapshot.sniperDirection         = m_snipers[0].active ? m_snipers[0].sig.direction : SIGNAL_NONE;
+      m_snapshot.sniperTargetPrice       = m_snipers[0].active ? m_snipers[0].targetPrice : 0.0;
+      m_snapshot.sniperBarsLeft          = m_snipers[0].active ? MathMax(0, m_cfg.extremumSniperWaitBars - m_snipers[0].barsElapsed) : 0;
 
       m_snapshot.symbolProfile  = ctx0.symbolProfile;
       m_snapshot.market         = ctx0.market;

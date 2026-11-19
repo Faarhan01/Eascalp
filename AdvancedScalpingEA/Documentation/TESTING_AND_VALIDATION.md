@@ -1,21 +1,25 @@
-# Testing, Validation & Strategy Tester Protocol (v2.9.0)
+# Testing, Validation & Strategy Tester Protocol (v3.1.0)
 
 ## 1. MT5 Strategy Tester Configuration
-- **Zero-Preset Plug-and-Play**: Attach `AdvancedScalpingEA.mq5` (`v2.90`) directly to any symbol and timeframe. With `InpAutoAdaptBySymbol = true`, `SymbolContext::Initialize()` + `SymbolIntelligence::GetAdaptiveAssetProfile()` immediately profile contract specs and cached history DNA (including empirical quantized-step Step Index detection) without loading any `.set` preset files.
-- **Modeling Mode**: Always select **"Every tick based on real ticks"** whenever broker tick history is available. Use M1 OHLC only for coarse sanity checks.
-- **Operating Mode**: `InpOperatingMode` defaults to `EA_MODE_LIVE_TRADING` with `InpAllowLiveTrading = true` (zero fake execution simulation), placing authentic orders inside MT5 Strategy Tester (`MQL_TESTER`) even if the live terminal Algo Trading toolbar button is disabled. Visual dashboard timers/canvas updates are bypassed in non-visual Strategy Tester for fast execution.
-- **Hedging vs. Netting Verification**: Validate both Hedging accounts (scaled positions permitted once existing position reaches Break-Even + 0.85 ATR) and Netting accounts (`PYRAMID_NETTING_BLOCKED` guard + multi-fill `DEAL_ENTRY_IN` commission apportionment in `PerformanceAnalytics`).
-- **Multi-Symbol Portfolio Testing**: Set `InpMultiSymbolList` (up to `8` symbols, e.g. `EURUSD,GBPUSD,USDJPY` or `Step Index,Volatility 75 Index`) to verify cross-symbol conviction sorting, shared-currency net lot caps, and per-symbol cooldowns.
+- **Zero-Preset Plug-and-Play**: Attach `AdvancedScalpingEA.mq5` (`v3.10`) directly to any symbol and timeframe. With `InpAutoAdaptBySymbol = true` and `InpAutoTuneFromHistory = true`, `SymbolContext::Initialize()` immediately profiles contract specs, 240-bar empirical Symbol DNA (Trending, Mean-Reverting, or Breakout-Sweep), empirical quantized Step Index detection, and 24-hour liquidity curves without `.set` files.
+- **Modeling Mode**: Always select **"Every tick based on real ticks"** whenever broker tick history is available (essential to accurately test live tick-level Entry Sniper pullback fills).
+- **Operating Mode**: `InpOperatingMode` defaults to `EA_MODE_LIVE_TRADING` with `InpAllowLiveTrading = true` (authentic order execution in both live accounts and Strategy Tester). Non-visual tester runs skip canvas dashboard overhead automatically.
 - **Universal Multi-Market Matrix**: Test across Forex Majors (`EURUSD`, `USDJPY`, `EURUSDm`), Crosses/Exotics (`GBPJPY`, `EURTRY`), Metals (`XAUUSD`, `XAGUSD`), Indices (`US500`, `NAS100`, `GER40`), Equities, Crypto CFDs (`BTCUSD`, `ETHUSD`), and Synthetics (`Step Index`, `Volatility 75 Index`, `Boom 500 Index`, `Crash 1000 Index`).
 
-## 2. Out-of-Sample, Expectancy & Monte Carlo Validation
-1. **In-Sample / Out-of-Sample Split**: Reserve at least 30% of unseen chronological data (`InpOosSplitRatio = 0.30`). Each CSV signal and trade row records `split_tag` (`IN_SAMPLE` vs `OUT_OF_SAMPLE`).
-2. **Expectancy & Wall-Snap Cost Stress**: Verify `InpSnapTpBeforeMajorWalls = true` trims obstructed targets cleanly before multi-touch S/R or PDH/PDL barriers while preserving `InpMinRewardRiskRatio` (`1.30`) and `InpMinTpToCostRatio` (`2.20` baseline / per-asset adaptive).
-3. **Score-Band Calibration**: Inspect `trade_history.csv` and the Dashboard **Score Bands** chart (`<60`, `60-74`, `75+`) to verify higher-scored consensus setups outperform marginal trades net of commission and slippage.
-4. **Shutdown Analytics Report & CSV Pipeline**: Verify the Experts journal prints `AnalyticsReport` (`MC_MedDD`, `MC_P95DD`, `ScoreBands`, best/weak Session & Symbol buckets) on `OnDeinit()` and that all 12 CSV files populate inside `MQL5/Files/AdvancedScalpingEA/Exports/`.
+## 2. v3.1.0 Functional & Expectancy Verification
+1. **Symbol DNA & Empirical Dead-Hour Check**:
+   - Inspect Experts journal at `OnInit()` and the Dashboard **Market & Signals** `Symbol DNA` line to verify 240-bar calibration (`DNA=... ER=... BO=... MR=... Swp=...`).
+   - With `InpEnableAdaptiveDeadHourFilter = true`, inspect `signal_rejections.csv` to verify low-liquidity/range off-hours below 48% baseline trigger `DEAD_LIQUIDITY_HOUR`.
+2. **Graph Extremum, H1 Wall Clearance & Live Entry Sniper**:
+   - Verify `InpEnableExtremumEntrySniper = true` (`2` wait bars, `0.20x ATR` min improvement) logs `SNIPER_ARMED_WAIT` on extended setups and executes at improved pullback pricing (`<= targetPrice` for buys, `>= targetPrice` for sells) or expires cleanly after `2` bars.
+   - Verify `InpSnapTpBeforeMajorWalls = true` trims obstructed targets cleanly before multi-touch S/R, PDH/PDL, and H1 swing barriers while preserving `1.55` min R:R and `2.60x` min TP-to-cost edge.
+3. **Out-of-Sample, Cost Stress & Strategy/Regime Benching**:
+   - Reserve >= 30% chronological unseen data (`InpOosSplitRatio = 0.30`, recorded per row as `IN_SAMPLE` vs `OUT_OF_SAMPLE`).
+   - Confirm `strategy_metrics.csv` benches negative-EV strategies/regimes cleanly (`8` early / `15` full / `5` regime) and winners reach `1.65x ATR` (`>= 1.05R`) before Break-Even and trail from `2.40x ATR` toward `3.20x ATR` targets.
+4. **CSV Performance Terminal Audit**:
+   - Open `trade_history.csv` and exported CSVs in the companion browser **CSV Performance Terminal** to audit expectancy, score bands (`<60`, `60-74`, `75+`), drawdown curve, and rejection distributions.
 
-## 3. Verification Checklist
-- Open `Experts/AdvancedScalpingEA.mq5` in MetaEditor 5 and compile with **0 errors and 0 warnings**.
-- Confirm `ObjectsDeleteAll(0, "ASEA_RO_")` clears all dashboard chart objects upon EA removal.
+## 3. Pre-Flight Checklist
+- Compile `Experts/AdvancedScalpingEA.mq5` (`v3.10`) in MetaEditor 5 with **0 errors and 0 warnings**.
+- Confirm `ObjectsDeleteAll(0, "ASEA_RO_")` clears all read-only dashboard objects cleanly upon removal.
 - Confirm all 6 dashboard tabs and 5 chart modes operate strictly read-only.
-- Load exported `.csv` files into the companion **CSV Performance Terminal** to review closed-trade expectancy, rejection breakdown, equity/drawdown curve, and strategy profit factors.

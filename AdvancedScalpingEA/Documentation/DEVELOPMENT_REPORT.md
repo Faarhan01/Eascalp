@@ -1,38 +1,27 @@
-# Development Report — AdvancedScalpingEA v2.9.0
+# Development Report — AdvancedScalpingEA v3.1.0
 
-## 1. v2.9.0 Full Audit: Hot-Path Performance, Zero-Copy Architecture & Code Hygiene
-1. **Intra-Bar Idle-Tick Fast Path & Zero-Copy Hot-Path Getters (`EAController.mqh`, `SymbolContext.mqh`, `SymbolIntelligence.mqh`, `MarketData.mqh`, `Diagnostics.mqh`)**:
-   - Eliminated full per-tick `SAnalysisContext` copies (`10` nested structs with `~30` MQL5 `string` members) on flat idle intra-bar ticks when no symbol position is open, no new bar occurred, and intra-bar micro evaluation is inactive (`m_risk.Update` maintains a 1 Hz flat heartbeat).
-   - Added lightweight scalar const getters across `SymbolIntelligence`, `MarketData`, `MarketRegime`, and `SymbolContext` (`GetPoint()`, `GetPipSize()`, `IsDataReady()`, `GetBarTime()`, `GetTickTime()`, `IsUnstable()`, `IsTickSurge()`) so intra-bar checks and indicator/candle/pattern modules short-circuit without copying snapshot structs containing strings.
-   - Added `m_lastFullSyncBar`, `m_profileDirty`, and `m_lastUnstableSynced` inside `SymbolContext` so static symbol profiles, indicator payloads, market structure, candle, and chart-pattern structs are synced only when a new closed bar arrives or symbol specs refresh.
-   - Added `IsLevelEnabled()` log-level gating before hot-path `StringFormat(...)` arguments and fixed `Diagnostics::ShouldThrottle` at 128 keys using a rolling overwrite cursor instead of stalling once full.
-2. **$O(1)$ Deal History Ledger, $O(1)$ Spread Window & Cached Analytics (`PerformanceAnalytics.mqh`, `MarketData.mqh`, `TickAnalysis.mqh`, `HistoricalResearch.mqh`, `PositionManagement.mqh`, `CSVLogger.mqh`)**:
-   - Replaced the $O(N^2)$ full history deal scan and per-close reverse `DEAL_ENTRY_IN` loop in `PerformanceAnalytics::SyncDealHistory()` with an $O(1)$-amortized incremental cursor (`m_lastScannedDealIdx`) paired with an active open-entry ledger (`SPosEntryAccum`), retaining reverse scanning only as a partial-history fallback.
-   - Replaced the $O(N)$ `MarketData::ComputeAverageSpread()` loop with an $O(1)$ running `m_spreadSum` accumulator (periodically resynced every 4096 samples for zero floating-point drift), and added `tickTimeMsc` directly inside `SMarketSnapshot` so `TickAnalysis` eliminates duplicate per-tick `SymbolInfoTick()` calls.
-   - Pre-allocated `TickAnalysis` `m_deltas[]` at `Initialize()`, replaced dynamic `deltas[]` resize in `SymbolIntelligence::CalibrateFromHistory()` with fixed stack storage `double deltas[48]`, memoized `HistoricalResearch::RunMonteCarloDrawdown95()` per `(m_tradeCount, iters)` with pre-allocated scratch buffers, and added early `if(!m_enabled) return;` guards across all 12 `CSVLogger::Log*()` writers.
-   - Optimized `MultiTimeframe::Evaluate()` with an intra-bar LTF/ITF/HTF + `structureBias` fast-path cache and avoided array/struct churn in `PositionManagement::RefreshOwnedPositions()` / `ManageSymbolPositions()` when no EA positions exist on that symbol.
-3. **Prior v2.8.0 Foundation Preserved (`Netting Safety`, `Universal Calibration`, `Risk & Scoring`)**:
-1. **MT5 Netting & Multi-Fill Accounting Fixes (`PerformanceAnalytics.mqh`, `EAController.mqh`)**:
-   - Fixed `PerformanceAnalytics::SyncDealHistory()` where MT5 Netting partial/scaled entries stopped scanning on the first `DEAL_ENTRY_IN` match, undercounting entry commissions and miscomputing hold duration. The loop now aggregates all `DEAL_ENTRY_IN` deals belonging to `posId`, uses the earliest open timestamp, and apportions entry commission/fee against total open volume.
-   - Added `PYRAMID_NETTING_BLOCKED` inside `EAController::ProcessTick()` when `!ctx.symbolProfile.isHedgingAccount` so same-direction add-ons on Netting accounts never shift weighted-average entry price across an already armed Break-Even stop.
-2. **Consensus-Before-Conflict Signal Resolution (`EAController.mqh`)**:
-   - Fixed ordering where `chopConflict` compared raw `bestBuyScore` vs `bestSellScore` before `ApplyMultiStrategyConsensus()` ran. Multi-strategy agreement bonuses and weak-opposite penalties now apply first; `OPPOSING_SIGNAL_CONFLICT` triggers only when post-consensus BUY and SELL clusters remain genuinely tied (`buyCount == sellCount` within `5.0` points).
-   - Replaced bare mid-loop `continue` inside `sameBarRej` suppression with explicit `allowCandidate` scoping so symbol risk/state progression remains linear and deterministic.
-3. **Universal Symbol Calibration at Startup & Strategy Refinements (`SymbolContext.mqh`, `MomentumScalping.mqh`, `LiquiditySweepScalping.mqh`)**:
-   - `SymbolContext::Initialize()` now executes an initial `CalibrateFromHistory()` pass whenever `>= 20` closed bars are already cached in MT5, ensuring `StepIndex=YES` empirical quantized-step detection, wick ratios, and regime thresholds are active prior to the first live tick.
-   - `MomentumScalping.mqh` now enforces a volatility-proportional ROC floor `MathMax(m_minRocAbs, atrPct * 0.40)` so high-volatility Crypto, Index, and Gold feeds require genuine ATR-relative velocity rather than a static FX-scale percent floor.
-   - `LiquiditySweepScalping.mqh` tightens snapback rejection close validation to require same-side bar polarity or a `>= 72%` wick snapback close.
-4. **Live Monte Carlo DD95 & Segmented Performance Wiring (`PerformanceAnalytics.mqh`, `AdaptiveLearning.mqh`, `EAController.mqh`, `Types.mqh`)**:
-   - Exposed `PerformanceAnalytics::GetSegmentedSummary()` over `m_bySession` and `m_bySymbol` buckets and wired both `HistoricalResearch::RunMonteCarloDrawdown95(150, ...)` and segmented summaries into Stage 2 Adaptive Learning updates and `EAController::Shutdown()` `AnalyticsReport` journal logs.
-   - Added centralized `SafeCurrentTime()` in `Types.mqh` across all timestamping and logging subsystems (`Diagnostics`, `StateManager`, `CSVLogger`, `SymbolIntelligence`, `TickAnalysis`, `PositionManagement`, `RiskManagement`, `TradeExecution`, `HistoricalResearch`, `AdaptiveLearning`, `PerformanceAnalytics`, `EAController`) to prevent `1970.01.01` epochs on disconnected terminals.
-   - Unified all 43 MQL5 file banners (`v2.8.0`), standardized `__ASEA_<DIR>_<FILE>_MQH__` include guards across Dashboard modules, synchronized `AdvancedScalpingEA.mq5` (`#property version "2.80"`), documentation, and `LandingPageView.tsx` (`v2.8.0`).
+## 1. v3.1.0 Universal Symbol Intelligence, Graph Extremum Filtering & Entry Sniper Upgrade
+Following the positive-expectancy overhaul in v3.0.0, v3.1.0 addresses two deeper alpha bottlenecks—blindness to symbol-specific empirical behavior and entering extended candles instead of waiting for graph extremes / pullbacks:
 
-## 2. Prior Milestone Foundation Preserved (v2.3.0 – v2.7.0)
-- Zero `.set` preset files required (`InpAutoAdaptBySymbol = true`, `EA_MODE_LIVE_TRADING`, ready-to-trade defaults).
-- Structural TP wall-snapping ahead of multi-touch S/R & PDH/PDL barriers (`InpSnapTpBeforeMajorWalls = true`).
-- Tick-seeded spread baselines, spike-bar auto-calibration, recency-adaptive expectancy weighting, and transient-resilient close retries.
-- Clean dynamic arrays + `ArraySetAsSeries(..., true)` in `MultiTimeframe.mqh` with zero MetaEditor static-array warnings.
+1. **Empirical Symbol DNA & Adaptive 24-Hour Liquidity Profiling (`Types.mqh`, `SymbolIntelligence.mqh`, `SymbolContext.mqh`, `TradeValidation.mqh`)**:
+   - Added `ENUM_SYMBOL_PERSONALITY` (`BALANCED`, `TRENDING`, `MEAN_REVERTING`, `BREAKOUT_SWEEP`) computed empirically over up to `240` historical bars via breakout follow-through rate, mean-reversion rate, efficiency ratio, and stop-hunt sweep wick overshoot (`avgSweepWickAtr`).
+   - Built a 24-hour empirical server-hour liquidity histogram (`hourlyActivityRatio[24]`, `hourlySampleCount[24]`) so `CTradeValidation` automatically skips dead-liquidity hours (`DEAD_LIQUIDITY_HOUR` when `InpEnableAdaptiveDeadHourFilter = true`) without brittle hardcoded broker timezone offsets.
+   - Added empirical sweep-depth SL padding and adaptive personality affinities (`trendAffinity`, `meanRevAffinity`, `sweepAffinity`) wired into `CStrategySelection` (`ComputePersonalityFit`) and `CSignalScoring`.
 
-## 3. Environment & Compilation Scope
-- All `43` MQL5 files (`42` `.mqh` + `1` `.mq5`), `143` inputs, include guards, brace/parenthesis balance, `ArraySetAsSeries` safety, and string format specifiers were verified via automated static audits on Linux.
-- Because MetaEditor 5 (`metaeditor64.exe`) and MT5 terminal binaries run natively on Windows, compile `AdvancedScalpingEA/Experts/AdvancedScalpingEA.mq5` in local MetaEditor 5 and run real-tick Strategy Tester validation following `TESTING_AND_VALIDATION.md`.
+2. **Full Graph Structure, Discount/Premium Zones & H1 Wall Clearance (`MarketStructure.mqh`, `IndicatorEngine.mqh`, `CandlestickRecognition.mqh`, `PatternRecognition.mqh`, `StrategyBase.mqh`)**:
+   - Upgraded `CMarketStructure` to prune invalidated broken pivots, track major swing boundaries (`swingHigh`, `swingLow`, `swingEquilibrium`, `swingRangePos01`, `isDiscountZone`, `isPremiumZone`), and cache 48-bar H1 swing extremes (`htfSwingHigh`, `htfSwingLow`).
+   - Added statistical Session VWAP Z-Score (`vwapZScore`), rising ADX detection (`adxRising`), Donchian extremity (`donchianPos01`), ATR-floored candlestick filters (`relSizeAtr >= 0.45`), and pattern recency/invalidation checks (`<= 20` bars).
+   - Implemented `HasClearRoomToTarget()` in `StrategyBase.mqh` and wired value-zone/extremum gates + H1/S/R wall clearance across all 10 strategy engines (`TrendPullback`, `EmaRibbonContinuation`, `MomentumScalping`, `BreakoutScalping`, `ReversalScalping`, `RangeScalping`, `VolatilityExpansion`, `MicroMomentum`, `LiquiditySweepScalping`, `VwapMeanReversion`).
+
+3. **Live Pullback / Extremum Entry Sniper (`EAController.mqh`, `AdvancedScalpingEA.mq5`, `DashboardManager.mqh`)**:
+   - Added `ComputeOptimalPullbackTrigger()` in `StrategyBase.mqh` and `SArmedEntrySniper` in `CEAController` (`InpEnableExtremumEntrySniper = true`, `InpExtremumSniperWaitBars = 2`, `InpExtremumPullbackMinAtr = 0.20`).
+   - Extended momentum/trend/breakout setups automatically arm the tick-level sniper to wait up to `2` bars for a pullback retracement (`optimalEntryPrice`) instead of market-chasing extended closes, disarming safely on SL breach, runaway drift, expiry, cooldown, or strong opposite signals.
+   - Added read-only `Symbol DNA`, `Swing / Zone` (`VWAP Z-Score`), and `Entry Sniper` diagnostics to `CDashboardManager`.
+
+## 2. Prior Milestone Foundation Preserved (v2.8.0 – v3.0.0)
+- **v3.0.0 Positive-Expectancy Execution**: `1.65x ATR` SL / `3.20x ATR` TP geometry, `>= 1.55R` floor, `>= 2.60x` TP-to-cost edge, non-clipping `>= 1.05R` BE & `2.40 ATR` trailing, unbiased `1.0` cold-start PF prior, negative-EV benching, and pullback-resilient MTF bias.
+- **v2.8.0 – v2.9.0 Engineering Core**: Idle-tick fast path, $O(1)$-amortized `PerformanceAnalytics` incremental deal ledger, Netting-safe multi-fill commission handling, startup history calibration, and zero-preset universal symbol initialization.
+
+## 3. Verification Scope
+- All `43` MQL5 files (`42` `.mqh` + `1` `.mq5`), include dependencies, brace/parenthesis balance, MQL5 syntax safety rules, and web bundle compilation are verified via automated static checks and Vite/TSX build tools on Linux.
+- Compile `AdvancedScalpingEA/Experts/AdvancedScalpingEA.mq5` (`v3.10`) in local MetaEditor 5 on Windows and run "Every tick based on real ticks" validation in MT5 Strategy Tester per `TESTING_AND_VALIDATION.md`.

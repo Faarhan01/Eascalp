@@ -1,7 +1,7 @@
 //+------------------------------------------------------------------+
 //|                                           PositionManagement.mqh |
 //|                        Advanced Multi-Market MT5 Scalping EA     |
-//|                        v2.9.0 MFE/MAE, Cost-BE & Chandelier Trail|
+//|                        v3.1.0 MFE/MAE, Cost-BE & Chandelier Trail|
 //+------------------------------------------------------------------+
 #ifndef __ASEA_TRADING_POSITIONMANAGEMENT_MQH__
 #define __ASEA_TRADING_POSITIONMANAGEMENT_MQH__
@@ -42,27 +42,27 @@ struct SPosMgmtConfig
    void ResetDefaults()
    {
       enableBreakEven = true;
-      breakEvenTriggerAtr = 1.45;
+      breakEvenTriggerAtr = 1.65;
       breakEvenLockAtr = 0.15;
       breakEvenCostPaddingMult = 1.25;
-      enablePartialClose = true;
-      partialCloseTriggerAtr = 1.90;
-      partialCloseFraction = 0.40;
+      enablePartialClose = false;
+      partialCloseTriggerAtr = 2.60;
+      partialCloseFraction = 0.30;
       moveToBeOnPartialClose = true;
       enableTrailingStop = true;
       useProgressiveTrail = true;
       useChandelierTrail = true;
       trailAlongStructureSwings = true;
       tightenTrailNearMaxHold = true;
-      trailingStartAtr = 2.00;
-      trailingStepAtr = 1.00;
-      enableStructureExit = true;
+      trailingStartAtr = 2.40;
+      trailingStepAtr = 1.25;
+      enableStructureExit = false;
       enableMomentumExit = false;
       enableStrategyExit = true;
       enableOppositeSignalExit = false;
-      oppositeSignalMinScore = 74.0;
+      oppositeSignalMinScore = 76.0;
       enableMaxHoldExit = true;
-      maxHoldingMinutes = 180;
+      maxHoldingMinutes = 360;
       closeBeforeWeekend = false;
       fridayCloseHour = 21;
    }
@@ -459,21 +459,21 @@ public:
          double profitDist = (p.direction == SIGNAL_BUY) ? (ctx.market.bid - p.openPrice) : (p.openPrice - ctx.market.ask);
          double newSL = p.currentSL;
 
-         // 5. Multi-factor CHoCH exit (only close when structure, EMA21, MACD & HTF/profit confirm; otherwise tighten SL)
-         if(m_cfg.enableStructureExit && ctx.structure.isReady && holdMin >= 15 && ctx.ind.isReady)
+         // 5. Optional CHoCH structure guard (never dumps early; tightens stop in meaningful profit >= 0.85 ATR)
+         if(m_cfg.enableStructureExit && ctx.structure.isReady && holdMin >= 20 && ctx.ind.isReady)
          {
             if(p.direction == SIGNAL_BUY && ctx.structure.lastEvent == STRUCT_CHOCH_BEAR)
             {
                if(ctx.ind.macdHist < 0.0 && ctx.market.close < ctx.ind.emaMedium &&
-                  (profitDist > effAtr * 0.35 || ctx.mtf.higherBias == SIGNAL_SELL))
+                  profitDist > effAtr * 0.85 && ctx.mtf.higherBias == SIGNAL_SELL)
                {
-                  SetExitReason(p.ticket, "Bearish CHoCH structure exit");
-                  exec.ClosePosition(p.ticket, p.symbol, "Bearish CHoCH structure exit", symIntel);
+                  SetExitReason(p.ticket, "Bearish CHoCH + HTF reversal exit");
+                  exec.ClosePosition(p.ticket, p.symbol, "Bearish CHoCH + HTF reversal exit", symIntel);
                   continue;
                }
-               else if(profitDist > effAtr * 0.45)
+               else if(profitDist > effAtr * 0.85)
                {
-                  double tightSL = ctx.market.bid - effAtr * 0.70;
+                  double tightSL = ctx.market.bid - effAtr * 0.90;
                   if(tightSL <= ctx.market.bid - minStopDist && (newSL <= 0.0 || tightSL > newSL))
                      newSL = tightSL;
                }
@@ -481,26 +481,26 @@ public:
             if(p.direction == SIGNAL_SELL && ctx.structure.lastEvent == STRUCT_CHOCH_BULL)
             {
                if(ctx.ind.macdHist > 0.0 && ctx.market.close > ctx.ind.emaMedium &&
-                  (profitDist > effAtr * 0.35 || ctx.mtf.higherBias == SIGNAL_BUY))
+                  profitDist > effAtr * 0.85 && ctx.mtf.higherBias == SIGNAL_BUY)
                {
-                  SetExitReason(p.ticket, "Bullish CHoCH structure exit");
-                  exec.ClosePosition(p.ticket, p.symbol, "Bullish CHoCH structure exit", symIntel);
+                  SetExitReason(p.ticket, "Bullish CHoCH + HTF reversal exit");
+                  exec.ClosePosition(p.ticket, p.symbol, "Bullish CHoCH + HTF reversal exit", symIntel);
                   continue;
                }
-               else if(profitDist > effAtr * 0.45)
+               else if(profitDist > effAtr * 0.85)
                {
-                  double tightSL = ctx.market.ask + effAtr * 0.70;
+                  double tightSL = ctx.market.ask + effAtr * 0.90;
                   if(tightSL >= ctx.market.ask + minStopDist && (newSL <= 0.0 || tightSL < newSL))
                      newSL = tightSL;
                }
             }
          }
 
-         // 6. Partial profit scaling (guarded against premature pre-1.0R trigger and un-splittable min-lots)
+         // 6. Optional partial scaling & trailing thresholds strictly anchored to >= 1.05R / 1.40R / 1.55R
          double initSlDist = (p.initialSL > 0.0) ? MathAbs(p.openPrice - p.initialSL) : 0.0;
-         double effBeTrigger   = (initSlDist > 0.0) ? MathMax(effAtr * effBeTrigMult, initSlDist * 1.00)   : (effAtr * effBeTrigMult);
-         double effPartTrigger = (initSlDist > 0.0) ? MathMax(effAtr * effPartTrigMult, initSlDist * 1.10) : (effAtr * effPartTrigMult);
-         double effTrailTrigger= (initSlDist > 0.0) ? MathMax(effAtr * effTrailStart, initSlDist * 1.15)   : (effAtr * effTrailStart);
+         double effBeTrigger   = (initSlDist > 0.0) ? MathMax(effAtr * effBeTrigMult, initSlDist * 1.05)   : (effAtr * effBeTrigMult);
+         double effPartTrigger = (initSlDist > 0.0) ? MathMax(effAtr * effPartTrigMult, initSlDist * 1.55) : (effAtr * effPartTrigMult);
+         double effTrailTrigger= (initSlDist > 0.0) ? MathMax(effAtr * effTrailStart, initSlDist * 1.40)   : (effAtr * effTrailStart);
 
          bool triggerImmediateBE = false;
          if(m_cfg.enablePartialClose && !p.partialExitTaken && profitDist >= effPartTrigger)
@@ -534,8 +534,8 @@ public:
          if(m_cfg.useProgressiveTrail && effAtr > 0.0)
          {
             double profitAtr = profitDist / effAtr;
-            if(profitAtr >= 3.5)      progMult = 0.60;
-            else if(profitAtr >= 2.5) progMult = 0.78;
+            if(profitAtr >= 4.2)      progMult = 0.65;
+            else if(profitAtr >= 3.2) progMult = 0.80;
          }
          if(m_cfg.tightenTrailNearMaxHold && m_cfg.enableMaxHoldExit && effMaxHoldMin > 0 &&
             holdMin >= (long)(effMaxHoldMin * 0.70) && profitDist > effAtr * 0.40)

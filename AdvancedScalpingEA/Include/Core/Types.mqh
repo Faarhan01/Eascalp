@@ -1,13 +1,13 @@
 //+------------------------------------------------------------------+
 //|                                                        Types.mqh |
 //|                        Advanced Multi-Market MT5 Scalping EA     |
-//|                        v2.9.0 Shared Enumerations & Structures   |
+//|                        v3.1.0 Shared Enumerations & Structures   |
 //+------------------------------------------------------------------+
 #ifndef __ASEA_CORE_TYPES_MQH__
 #define __ASEA_CORE_TYPES_MQH__
 
 #define EA_PROJECT_NAME       "AdvancedScalpingEA"
-#define EA_PROJECT_VERSION    "2.9.0"
+#define EA_PROJECT_VERSION    "3.1.0"
 #define EA_DATA_ROOT          "AdvancedScalpingEA"
 #define EA_MAX_STRATEGIES     10
 #define EA_MAX_TF_SLOTS       14
@@ -56,6 +56,14 @@ enum ENUM_ASSET_CLASS_OVERRIDE
    ASSET_OVERRIDE_SYNTHETIC    = 8,  // Force 24/7 Synthetic Index Profile
    ASSET_OVERRIDE_CRYPTO       = 9,  // Force Crypto CFD Profile
    ASSET_OVERRIDE_EQUITY       = 10  // Force Equity / Stock CFD Profile
+};
+
+enum ENUM_SYMBOL_PERSONALITY
+{
+   PERSONALITY_BALANCED       = 0,
+   PERSONALITY_TRENDING       = 1,
+   PERSONALITY_MEAN_REVERTING = 2,
+   PERSONALITY_BREAKOUT_SWEEP = 3
 };
 
 enum ENUM_SIGNAL_DIRECTION
@@ -270,6 +278,14 @@ struct SSymbolProfile
    double                quantizedStepSize;
    double                spreadToAtrBaselinePct;
    double                spikeBarRatio;
+   ENUM_SYMBOL_PERSONALITY symbolPersonality;
+   double                breakoutFollowRate;
+   double                meanReversionRate;
+   double                avgSweepWickAtr;
+   double                hourlyActivityRatio[24];
+   int                   hourlySampleCount[24];
+   bool                  hourlyProfileReady;
+   int                   activeHoursCount;
    bool                  empiricalQuantizedStep;
    bool                  empiricalProfileReady;
    string                microstructureSummary;
@@ -302,6 +318,14 @@ struct SSymbolProfile
       measuredAvgSlippagePts = 0.0; measuredFillCount = 0;
       medianBarRangeAtr = 1.0; empiricalEffRatio = 0.25; avgWickRatio = 0.35;
       quantizedStepSize = 0.0; spreadToAtrBaselinePct = 0.0; spikeBarRatio = 0.0;
+      symbolPersonality = PERSONALITY_BALANCED;
+      breakoutFollowRate = 0.50; meanReversionRate = 0.50; avgSweepWickAtr = 0.25;
+      for(int h = 0; h < 24; h++)
+      {
+         hourlyActivityRatio[h] = 1.0;
+         hourlySampleCount[h] = 0;
+      }
+      hourlyProfileReady = false; activeHoursCount = 0;
       empiricalQuantizedStep = false; empiricalProfileReady = false;
       microstructureSummary = "Pending history calibration";
       isHedgingAccount = true;
@@ -332,6 +356,9 @@ struct SAdaptiveAssetProfile
    double           minVolatilityRatio;
    double           minTpToCostRatio;
    double           minSignalScore;
+   double           trendAffinity;
+   double           meanRevAffinity;
+   double           sweepAffinity;
    int              lossCooldownBars;
    int              recommendedSlippagePts;
    bool             allow24x7Continuous;
@@ -340,28 +367,31 @@ struct SAdaptiveAssetProfile
    void ResetDefaults()
    {
       profileName = "Forex Major";
-      slAtrMult = 1.60;
-      tpAtrMult = 2.80;
-      beTriggerAtr = 1.45;
-      partialTriggerAtr = 1.90;
-      partialFraction = 0.40;
-      trailStartAtr = 2.00;
-      trailStepAtr = 1.00;
+      slAtrMult = 1.65;
+      tpAtrMult = 3.20;
+      beTriggerAtr = 1.65;
+      partialTriggerAtr = 2.60;
+      partialFraction = 0.30;
+      trailStartAtr = 2.40;
+      trailStepAtr = 1.25;
       adxStrongThresh = 26.0;
-      adxWeakThresh = 17.0;
+      adxWeakThresh = 18.0;
       volHighRatio = 1.45;
       volLowRatio = 0.70;
-      spreadUnstableRatio = 2.80;
-      maxSpreadRatio = 2.50;
-      maxSpreadAtrPct = 28.0;
-      maxVolatilityRatio = 3.20;
-      minVolatilityRatio = 0.30;
-      minTpToCostRatio = 2.20;
-      minSignalScore = 60.0;
-      lossCooldownBars = 3;
+      spreadUnstableRatio = 2.60;
+      maxSpreadRatio = 2.15;
+      maxSpreadAtrPct = 20.0;
+      maxVolatilityRatio = 2.75;
+      minVolatilityRatio = 0.42;
+      minTpToCostRatio = 2.60;
+      minSignalScore = 64.0;
+      trendAffinity = 1.0;
+      meanRevAffinity = 1.0;
+      sweepAffinity = 1.0;
+      lossCooldownBars = 4;
       recommendedSlippagePts = 25;
       allow24x7Continuous = false;
-      tuningNotes = "Default balanced FX scaling";
+      tuningNotes = "Positive-expectancy FX scaling (v3.1.0)";
    }
 };
 
@@ -459,6 +489,8 @@ struct SIndicatorValues
    double   rollingStdDev;       // price close stddev
    double   volatilityPercentile;// 0..100 over 100 bars
    double   adxMain;
+   double   adxPrev;
+   bool     adxRising;
    double   adxPlusDI;
    double   adxMinusDI;
    double   bbUpper;
@@ -469,6 +501,7 @@ struct SIndicatorValues
    double   donchianHigh;
    double   donchianMid;
    double   donchianLow;
+   double   donchianPos01;
    double   stochK;
    double   stochD;
    double   cci;
@@ -483,6 +516,8 @@ struct SIndicatorValues
    double   emaDistanceAtr;      // (close[0] - emaMedium) / atr
    double   relativeVolume;      // current closed bar volume / 20-bar avg volume
    double   vwap;
+   double   vwapStdDev;
+   double   vwapZScore;
    bool     vwapAvailable;
    bool     bullDivergence;
    bool     bearDivergence;
@@ -497,14 +532,14 @@ struct SIndicatorValues
       atr = 0.0; atrShort = 0.0; atrBaseline = 0.0;
       relativeAtr = 1.0; shortLongVolRatio = 1.0;
       rollingStdDev = 0.0; volatilityPercentile = 50.0;
-      adxMain = 0.0; adxPlusDI = 0.0; adxMinusDI = 0.0;
+      adxMain = 0.0; adxPrev = 0.0; adxRising = false; adxPlusDI = 0.0; adxMinusDI = 0.0;
       bbUpper = 0.0; bbMiddle = 0.0; bbLower = 0.0; bbWidthPct = 0.0; prevBbWidthPct = 0.0;
-      donchianHigh = 0.0; donchianMid = 0.0; donchianLow = 0.0;
+      donchianHigh = 0.0; donchianMid = 0.0; donchianLow = 0.0; donchianPos01 = 0.5;
       stochK = 50.0; stochD = 50.0; cci = 0.0; wpr = -50.0; psar = 0.0;
       momentum = 100.0; roc = 0.0; prevRoc = 0.0; momentumAccel = 0.0;
       directionalPersist = 0.0; priceDisplacementAtr = 0.0; emaDistanceAtr = 0.0;
       relativeVolume = 1.0;
-      vwap = 0.0; vwapAvailable = false;
+      vwap = 0.0; vwapStdDev = 0.0; vwapZScore = 0.0; vwapAvailable = false;
       bullDivergence = false; bearDivergence = false; momentumExhaustion = false;
       isReady = false;
    }
@@ -527,6 +562,17 @@ struct SStructureState
    double   rangeHigh;
    double   rangeLow;
    double   rangeWidthAtr;
+   double   swingHigh;
+   double   swingLow;
+   double   swingEquilibrium;
+   double   swingRangePos01;     // 0.0 = major swing low, 1.0 = major swing high
+   bool     isDiscountZone;      // <= 0.38 of swing range
+   bool     isPremiumZone;       // >= 0.62 of swing range
+   int      barsSinceSwingHigh;
+   int      barsSinceSwingLow;
+   double   htfSwingHigh;
+   double   htfSwingLow;
+   datetime htfSwingBarTime;
    double   prevDayHigh;
    double   prevDayLow;
    datetime prevDayBarTime;
@@ -556,6 +602,10 @@ struct SStructureState
       nearestSupport = 0.0; nearestResistance = 0.0;
       supportRejectCount = 0; resistanceRejectCount = 0;
       rangeHigh = 0.0; rangeLow = 0.0; rangeWidthAtr = 0.0;
+      swingHigh = 0.0; swingLow = 0.0; swingEquilibrium = 0.0; swingRangePos01 = 0.5;
+      isDiscountZone = false; isPremiumZone = false;
+      barsSinceSwingHigh = 0; barsSinceSwingLow = 0;
+      htfSwingHigh = 0.0; htfSwingLow = 0.0; htfSwingBarTime = 0;
       prevDayHigh = 0.0; prevDayLow = 0.0; prevDayBarTime = 0;
       hasHH = false; hasHL = false; hasLH = false; hasLL = false;
       tightConsolidation = false; wideConsolidation = false; inConsolidation = false;
@@ -729,6 +779,7 @@ struct STradeSignal
    string                strategyName;
    ENUM_SIGNAL_DIRECTION direction;
    double                entryPrice;
+   double                optimalEntryPrice;
    double                stopLoss;
    double                takeProfit;
    double                confidenceRaw;
@@ -744,19 +795,21 @@ struct STradeSignal
    string                conflictingConditions;
    int                   consensusCount;
    bool                  hasOppositeConflict;
+   bool                  requiresPullbackWait;
    bool                  isValid;
 
    void Reset()
    {
       signalId = ""; timestamp = 0; symbol = ""; timeframe = PERIOD_CURRENT;
       strategyId = STRAT_TREND_PULLBACK; strategyName = ""; direction = SIGNAL_NONE;
-      entryPrice = 0.0; stopLoss = 0.0; takeProfit = 0.0;
+      entryPrice = 0.0; optimalEntryPrice = 0.0; stopLoss = 0.0; takeProfit = 0.0;
       confidenceRaw = 0.0; compositeScore = 0.0;
       breakdown.Reset(); expectancy.Reset();
       regime = REGIME_UNKNOWN; suitability = SUIT_INSUFFICIENT_DATA;
       rationale = ""; supportingIndicators = ""; supportingStructure = "";
       patternConfirmations = ""; conflictingConditions = "";
       consensusCount = 1; hasOppositeConflict = false;
+      requiresPullbackWait = false;
       isValid = false;
    }
 };
@@ -1038,8 +1091,8 @@ struct SIntelligenceSummary
       stage1RawObs = "0 observations";
       stage2HistoricalFinding = "Awaiting minimum sample";
       stage3Recommendation = "None";
-      stage4ValidatedConfig = "AutoAdaptive_v2.9";
-      stage5ActiveConfig = "AutoAdaptive_v2.9";
+      stage4ValidatedConfig = "AutoAdaptive_v3.1";
+      stage5ActiveConfig = "AutoAdaptive_v3.1";
       lastValidationTime = 0;
       researchSummary = "Collecting minimum sample sizes";
    }
@@ -1061,6 +1114,11 @@ struct SDashboardSnapshot
    string                operationalStatus;
    datetime              lastAnalysisTime;
    string                activeStrategyName;
+   bool                  sniperActive;
+   string                sniperStatus;
+   ENUM_SIGNAL_DIRECTION sniperDirection;
+   double                sniperTargetPrice;
+   int                   sniperBarsLeft;
 
    SSymbolProfile        symbolProfile;
    SMarketSnapshot       market;
@@ -1086,6 +1144,8 @@ struct SDashboardSnapshot
       terminalConnected = false; tradeAllowedTerminal = false;
       initialized = false; operationalStatus = "Booting";
       lastAnalysisTime = 0; activeStrategyName = "None";
+      sniperActive = false; sniperStatus = "Scanning";
+      sniperDirection = SIGNAL_NONE; sniperTargetPrice = 0.0; sniperBarsLeft = 0;
 
       symbolProfile.Reset(); market.Reset(); ticks.Reset();
       indicators.Reset(); structure.Reset(); candle.Reset();
@@ -1199,6 +1259,17 @@ string AssetClassToString(const ENUM_ASSET_CLASS ac)
       case ASSET_CRYPTO:       return "Crypto CFD";
       case ASSET_EQUITY:       return "Equity / Stock";
       default:                 return "Unknown";
+   }
+}
+
+string SymbolPersonalityToString(const ENUM_SYMBOL_PERSONALITY p)
+{
+   switch(p)
+   {
+      case PERSONALITY_TRENDING:       return "Trending";
+      case PERSONALITY_MEAN_REVERTING: return "Mean-Reverting";
+      case PERSONALITY_BREAKOUT_SWEEP: return "Breakout-Sweep";
+      default:                         return "Balanced";
    }
 }
 

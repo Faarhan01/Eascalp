@@ -1,7 +1,7 @@
 //+------------------------------------------------------------------+
 //|                                               MultiTimeframe.mqh |
 //|                        Advanced Multi-Market MT5 Scalping EA     |
-//|                        v2.9.0 Weighted MTF Context Engine        |
+//|                        v3.0.0 Structural MTF Context Engine     |
 //+------------------------------------------------------------------+
 #ifndef __ASEA_MARKET_MULTITIMEFRAME_MQH__
 #define __ASEA_MARKET_MULTITIMEFRAME_MQH__
@@ -51,8 +51,8 @@ private:
          CopyClose(m_symbol, tf, 1, 1, cls) < 1)
          return SIGNAL_NONE;
 
-      bool risingFast  = (fast[0] > fast[1]);
-      bool fallingFast = (fast[0] < fast[1]);
+      bool slowRisingOrFlat  = (slow[0] >= slow[1]);
+      bool slowFallingOrFlat = (slow[0] <= slow[1]);
       bool bullPriceOk = (cls[0] > slow[0]);
       bool bearPriceOk = (cls[0] < slow[0]);
 
@@ -66,10 +66,11 @@ private:
             CopyBuffer(hExtra, 2, 1, 1, minusDI) >= 1)
          {
             outDataOk = true;
-            if(fast[0] > slow[0] && risingFast && bullPriceOk && plusDI[0] >= minusDI[0] + 1.5 && extra[0] >= 16.0)
-               return SIGNAL_BUY;
-            if(fast[0] < slow[0] && fallingFast && bearPriceOk && minusDI[0] >= plusDI[0] + 1.5 && extra[0] >= 16.0)
-               return SIGNAL_SELL;
+            // Structural HTF bias stays intact through 1-bar pullbacks above slow EMA55 when ADX+DI confirm trend
+            bool strongBullStruct = (fast[0] > slow[0] && bullPriceOk && plusDI[0] >= minusDI[0] + 1.5 && extra[0] >= 17.0 && (slowRisingOrFlat || fast[0] >= fast[1]));
+            bool strongBearStruct = (fast[0] < slow[0] && bearPriceOk && minusDI[0] >= plusDI[0] + 1.5 && extra[0] >= 17.0 && (slowFallingOrFlat || fast[0] <= fast[1]));
+            if(strongBullStruct) return SIGNAL_BUY;
+            if(strongBearStruct) return SIGNAL_SELL;
          }
          return SIGNAL_NONE;
       }
@@ -78,15 +79,15 @@ private:
          if(CopyBuffer(hExtra, 0, 1, 1, extra) >= 1)
          {
             outDataOk = true;
-            if(fast[0] > slow[0] && risingFast && bullPriceOk && extra[0] > 51.0)  return SIGNAL_BUY;
-            if(fast[0] < slow[0] && fallingFast && bearPriceOk && extra[0] < 49.0) return SIGNAL_SELL;
+            if(fast[0] > slow[0] && bullPriceOk && slowRisingOrFlat  && extra[0] >= 48.0) return SIGNAL_BUY;
+            if(fast[0] < slow[0] && bearPriceOk && slowFallingOrFlat && extra[0] <= 52.0) return SIGNAL_SELL;
          }
          return SIGNAL_NONE;
       }
 
       outDataOk = true;
-      if(fast[0] > slow[0] && risingFast && bullPriceOk)  return SIGNAL_BUY;
-      if(fast[0] < slow[0] && fallingFast && bearPriceOk) return SIGNAL_SELL;
+      if(fast[0] > slow[0] && bullPriceOk && slowRisingOrFlat)  return SIGNAL_BUY;
+      if(fast[0] < slow[0] && bearPriceOk && slowFallingOrFlat) return SIGNAL_SELL;
       return SIGNAL_NONE;
    }
 

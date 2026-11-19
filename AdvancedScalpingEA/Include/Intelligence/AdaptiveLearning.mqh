@@ -1,7 +1,7 @@
 //+------------------------------------------------------------------+
 //|                                             AdaptiveLearning.mqh |
 //|                        Advanced Multi-Market MT5 Scalping EA     |
-//|                        v2.9.0 5-Stage Controlled Research Engine |
+//|                        v3.1.0 5-Stage Controlled Research Engine |
 //+------------------------------------------------------------------+
 #ifndef __ASEA_INTELLIGENCE_ADAPTIVELEARNING_MQH__
 #define __ASEA_INTELLIGENCE_ADAPTIVELEARNING_MQH__
@@ -35,8 +35,8 @@ public:
    CAdaptiveLearning()
    {
       m_enableAdaptiveEvaluation = true;
-      m_minSamplePerRegime = 20;
-      m_deteriorationPfFloor = 0.85;
+      m_minSamplePerRegime = 15;
+      m_deteriorationPfFloor = 0.92;
       m_diag = NULL;
       m_summary.Reset();
       m_lastProposal.timestamp = 0;
@@ -56,7 +56,7 @@ public:
       m_diag = diag;
       m_summary.Reset();
       m_summary.learningStatus = m_enableAdaptiveEvaluation ? "5-Stage Controlled (Non-Mutating)" : "Passive Logging Only";
-      m_summary.stage4ValidatedConfig = (activeCfgVer != "") ? activeCfgVer : "AutoAdaptive_v2.9";
+      m_summary.stage4ValidatedConfig = (activeCfgVer != "") ? activeCfgVer : "AutoAdaptive_v3.1";
       m_summary.stage5ActiveConfig    = m_summary.stage4ValidatedConfig;
    }
 
